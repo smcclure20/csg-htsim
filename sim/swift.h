@@ -53,7 +53,7 @@ public:
     void adjust_cwnd(simtime_picosec delay, SwiftAck::seq_t ackno);
     void applySwiftLimits();
     void handle_ack(SwiftAck::seq_t ackno);
-    void move_path();
+    void move_path(bool permit_cycles = false);
     void reroute(const Route &route);
     void doNextEvent();
     void rtx_timer_hook(simtime_picosec now, simtime_picosec period);
@@ -133,7 +133,7 @@ public:
 
     void doNextEvent();
     void update_dsn_ack(SwiftAck::seq_t ds_ackno);
-    //virtual void receivePacket(Packet& pkt);
+    // virtual void receivePacket(Packet& pkt);
 
     void set_flowsize(uint64_t flow_size_in_bytes) {
         _flow_size = flow_size_in_bytes + mss();
@@ -146,6 +146,8 @@ public:
     }
 
     bool more_data_available() const;
+
+    vector<SwiftSubflowSrc*>& subflows() {return _subs;}
 
     SwiftPacket::seq_t get_next_dsn() {
         SwiftPacket::seq_t dsn = _highest_dsn_sent + 1;
@@ -165,6 +167,11 @@ public:
     void permute_paths();
     bool _plb;
     inline bool plb() const {return _plb;}
+
+    // packet switching
+    bool _switch_spraying;
+    void set_switch_spraying() {_switch_spraying = true;}
+    inline bool switch_spraying() const {return _switch_spraying;}
 
 
     // should really be private, but loggers want to see:

@@ -385,6 +385,11 @@ SwiftSubflowSrc::send_next_packet() {
     p->set_ts(eventlist().now());
     p->sendOn();
     _pacer.just_sent();
+
+    if (_src.switch_spraying()) { // switch path on every packet (TODO: update to be more like how NDP does this)
+        move_path(true);
+    }
+
     return true;
 }
 
@@ -553,15 +558,19 @@ SwiftSubflowSrc::connect(SwiftSink& sink, const Route& routeout, const Route& ro
 }
 
 void
-SwiftSubflowSrc::move_path() {
+SwiftSubflowSrc::move_path(bool permit_cycles) {
     cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     if (_src._paths.size() == 0) {
         cout << nodename() << " cant move_path\n";
         return;
     }
     _path_index++;
-    // if we've moved paths so often we've run out of paths, I want to know
-    assert(_path_index < _src._paths.size()); 
+    if (!permit_cycles) {
+        // if we've moved paths so often we've run out of paths, I want to know
+        assert(_path_index < _src._paths.size()); 
+    } else if (_path_index >= _src._paths.size()) {
+        _path_index = _path_index % _src._paths.size();
+    }
     Route* new_route = _src._paths[_path_index]->clone();
     new_route->push_back(_subflow_sink);
     _route = new_route;
