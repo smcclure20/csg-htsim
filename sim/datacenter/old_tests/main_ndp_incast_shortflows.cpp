@@ -480,14 +480,15 @@ int main(int argc, char **argv) {
          << " RTX: " << total_bounced << endl;
 }
 
-string ntoa(double n) {
-    stringstream s;
-    s << n;
-    return s.str();
-}
+// string ntoa(double n) {
+//     stringstream s;
+//     s << n;
+//     return s.str();
+// }
 
-string itoa(uint64_t n) {
-    stringstream s;
-    s << n;
-    return s.str();
-}
+// string itoa(uint64_t n) {
+//     stringstream s;
+//     s << n;
+//     return s.str();
+// }
+

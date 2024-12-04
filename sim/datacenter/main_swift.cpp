@@ -47,6 +47,8 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 #define USE_FIRST_FIT 0
 #define FIRST_FIT_INTERVAL 100
 
+enum NetRouteStrategy {NOT_SET= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
+
 EventList eventlist;
 
 Logfile* lg;
@@ -64,11 +66,13 @@ int main(int argc, char **argv) {
     stringstream filename(ios_base::out);
     uint32_t packet_size = 4000;
     bool plb = false;
+    bool hostspray = false;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
     simtime_picosec endtime = timeFromMs(1.2);
     char* tm_file = NULL;
     char* topo_file = NULL;
+    NetRouteStrategy route_strategy = NOT_SET;
 
     int i = 1;
     filename << "logout.dat";
@@ -126,6 +130,39 @@ int main(int argc, char **argv) {
                 exit_error(argv[0]);
             }
             i++;            
+        } else if (!strcmp(argv[i],"-hostspray")){
+            if (strcmp(argv[i+1], "off") == 0) {
+                hostspray = false;
+            } else if (strcmp(argv[i+1], "on") == 0) {
+                hostspray = true;
+                if (plb) {
+                    cout << "Spraying and PLB cannot be enabled at the same time" << endl;
+                    exit(1);
+                }
+            } else {
+                exit_error(argv[0]);
+            }
+            i++;            
+        } else if (!strcmp(argv[i],"-strat")){
+            if (!strcmp(argv[i+1], "ecmp")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+                route_strategy = ECMP;
+            } else if (!strcmp(argv[i+1], "ar")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                route_strategy = ADAPTIVE_ROUTING;
+            } else if (!strcmp(argv[i+1], "ecmp_ar")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP_ADAPTIVE);
+                route_strategy = ECMP_ADAPTIVE;
+            } else if (!strcmp(argv[i+1], "rr")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::RR);
+                route_strategy = RR;
+            } else if (!strcmp(argv[i+1], "rr_ecmp")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::RR_ECMP);
+                route_strategy = RR_ECMP;
+            } else {
+                exit_error(argv[0]);
+            }
+            i++;
         } else {
             exit_error(argv[i]);
         }
@@ -144,6 +181,8 @@ int main(int argc, char **argv) {
     cout << "flowsize " << flowsize << endl;
     cout << "mtu " << packet_size << endl;
     cout << "plb " << plb << endl;
+    cout << "hostspray " << hostspray << endl;
+    cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
       
     // prepare the loggers
@@ -223,7 +262,7 @@ int main(int argc, char **argv) {
     int* is_dest = new int[no_of_nodes];
     
     for (uint32_t i=0; i<no_of_nodes; i++){
-is_dest[i] = 0;
+        is_dest[i] = 0;
         net_paths[i] = new vector<const Route*>*[no_of_nodes];
         for (uint32_t j = 0; j<no_of_nodes; j++)
             net_paths[i][j] = NULL;
@@ -288,6 +327,9 @@ is_dest[i] = 0;
         if (plb) {
             swiftSrc->enable_plb();
         }
+        if (hostspray) {
+            swiftSrc->set_switch_spraying();
+        }
         swiftSnk = new SwiftSink();
         //ReorderBufferLoggerSampling* buf_logger = new ReorderBufferLoggerSampling(timeFromMs(0.01), eventlist);
         //logfile.addLogger(*buf_logger);
@@ -304,72 +346,82 @@ is_dest[i] = 0;
         logfile.writeName(*swiftSnk);
           
         //swiftRtxScanner.registerSwift(*swiftSrc);
-          
-        uint32_t choice = 0;
+
+        Route* routeout, *routein;
+        if (route_strategy != NOT_SET) {
+            for (SwiftSubflowSrc* sub : swiftSrc->subflows()) {
+                routeout = top->setup_tor_route(src,sub->flow().flow_id(),sub); // TODO: figure out the flowid thing
+                routein = top->setup_tor_route(dest,sub->flow().flow_id(),swiftSnk);
+            }
+            // swiftSrc->connect(*routeout, *routein, *swiftSnk, crt->start);
+        }
+        else {
+            uint32_t choice = 0;
           
 #ifdef FAT_TREE
-        choice = rand()%net_paths[src][dest]->size();
+            choice = rand()%net_paths[src][dest]->size();
 #endif
           
 #ifdef OV_FAT_TREE
-        choice = rand()%net_paths[src][dest]->size();
+            choice = rand()%net_paths[src][dest]->size();
 #endif
           
 #ifdef MH_FAT_TREE
-        int use_all = it_sub==net_paths[src][dest]->size();
+            int use_all = it_sub==net_paths[src][dest]->size();
 
-        if (use_all)
-            choice = inter;
-        else
-            choice = rand()%net_paths[src][dest]->size();
+            if (use_all)
+                choice = inter;
+            else
+                choice = rand()%net_paths[src][dest]->size();
 #endif
           
 #ifdef VL2
-        choice = rand()%net_paths[src][dest]->size();
+            choice = rand()%net_paths[src][dest]->size();
 #endif
           
 #ifdef STAR
-        choice = 0;
+            choice = 0;
 #endif
           
 #ifdef BCUBE
-        //choice = inter;
-          
-        int min = -1, max = -1,minDist = 1000,maxDist = 0;
-        if (subflow_count==1){
-            //find shortest and longest path 
-            for (uint32_t dd=0;dd<net_paths[src][dest]->size();dd++){
-                if (net_paths[src][dest]->at(dd)->size()<minDist){
-                    minDist = net_paths[src][dest]->at(dd)->size();
-                    min = dd;
+            //choice = inter;
+            
+            int min = -1, max = -1,minDist = 1000,maxDist = 0;
+            if (subflow_count==1){
+                //find shortest and longest path 
+                for (uint32_t dd=0;dd<net_paths[src][dest]->size();dd++){
+                    if (net_paths[src][dest]->at(dd)->size()<minDist){
+                        minDist = net_paths[src][dest]->at(dd)->size();
+                        min = dd;
+                    }
+                    if (net_paths[src][dest]->at(dd)->size()>maxDist){
+                        maxDist = net_paths[src][dest]->at(dd)->size();
+                        max = dd;
+                    }
                 }
-                if (net_paths[src][dest]->at(dd)->size()>maxDist){
-                    maxDist = net_paths[src][dest]->at(dd)->size();
-                    max = dd;
-                }
-            }
-            choice = min;
-        } 
-        else
-            choice = rand()%net_paths[src][dest]->size();
+                choice = min;
+            } 
+            else
+                choice = rand()%net_paths[src][dest]->size();
 #endif
-        if (choice>=net_paths[src][dest]->size()){
-            printf("Weird path choice %d out of %lu\n",choice,net_paths[src][dest]->size());
-            exit(1);
-        }
+            if (choice>=net_paths[src][dest]->size()){
+                printf("Weird path choice %d out of %lu\n",choice,net_paths[src][dest]->size());
+                exit(1);
+            }
           
 #if PRINT_PATHS
-        for (uint32_t ll=0;ll<net_paths[src][dest]->size();ll++){
-            paths << "Route from "<< ntoa(src) << " to " << ntoa(dest) << "  (" << ll << ") -> " ;
-            print_path(paths,net_paths[src][dest]->at(ll));
-        }
+            for (uint32_t ll=0;ll<net_paths[src][dest]->size();ll++){
+                paths << "Route from "<< ntoa(src) << " to " << ntoa(dest) << "  (" << ll << ") -> " ;
+                print_path(paths,net_paths[src][dest]->at(ll));
+            }
 #endif
           
-        routeout = new Route(*(net_paths[src][dest]->at(choice)));
-        //routeout->push_back(swiftSnk);
-          
-        routein = new Route(*top->get_paths(dest,src)->at(choice));
-        //routein->push_back(swiftSrc);
+            routeout = new Route(*(net_paths[src][dest]->at(choice)));
+            //routeout->push_back(swiftSnk);
+            
+            routein = new Route(*top->get_paths(dest,src)->at(choice));
+            //routein->push_back(swiftSrc);
+        }
 
         if (no_of_subflows == 1) {
             swiftSrc->connect(*routeout, *routein, *swiftSnk, timeFromUs((uint32_t)crt->start));

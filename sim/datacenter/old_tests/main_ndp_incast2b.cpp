@@ -490,14 +490,15 @@ int main(int argc, char **argv) {
         cout << "Hop " << i << " Count " << counts[i] << endl;
 }
 
-string ntoa(double n) {
-    stringstream s;
-    s << n;
-    return s.str();
-}
+// string ntoa(double n) {
+//     stringstream s;
+//     s << n;
+//     return s.str();
+// }
 
-string itoa(uint64_t n) {
-    stringstream s;
-    s << n;
-    return s.str();
-}
+// string itoa(uint64_t n) {
+//     stringstream s;
+//     s << n;
+//     return s.str();
+// }
+

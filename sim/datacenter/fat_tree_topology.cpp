@@ -995,6 +995,18 @@ void FatTreeTopology::add_failed_link(uint32_t type, uint32_t switch_id, uint32_
     pipes_nc_nup[k][switch_id][0] = NULL;
 }
 
+Route* FatTreeTopology::setup_tor_route(uint32_t hostnum, flowid_t flow_id, PacketSink* host) {
+    Route* torroute = new Route();
+    torroute->push_back(queues_ns_nlp[hostnum][HOST_POD_SWITCH(hostnum)][0]);
+    torroute->push_back(pipes_ns_nlp[hostnum][HOST_POD_SWITCH(hostnum)][0]);
+    torroute->push_back(queues_ns_nlp[hostnum][HOST_POD_SWITCH(hostnum)][0]->getRemoteEndpoint());
+
+    assert(switches_lp[HOST_POD_SWITCH(hostnum)]);
+
+    switches_lp[HOST_POD_SWITCH(hostnum)]->addHostPort(hostnum,flow_id,host);
+    return torroute;
+}
+
 
 vector<const Route*>* FatTreeTopology::get_bidir_paths(uint32_t src, uint32_t dest, bool reverse){
     vector<const Route*>* paths = new vector<const Route*>();
