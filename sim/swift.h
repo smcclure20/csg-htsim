@@ -124,11 +124,15 @@ class SwiftSrc : public EventSource {
     friend class SwiftRtxTimerScanner;
     //friend class SwiftSubflowSrc;
 public:
-    SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* pktlogger, EventList &eventlist);
+SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* pktlogger, EventList &eventlist);
+    SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* pktlogger, EventList &eventlist, uint32_t addr);
     void log(SwiftSubflowSrc* sub, SwiftLogger::SwiftEvent event);
     virtual void connect(const Route& routeout, const Route& routeback, 
                          SwiftSink& sink, simtime_picosec startTime);
+    virtual void connect(const Route& routeout, const Route& routeback, 
+                         SwiftSink& sink, simtime_picosec startTime, uint32_t destination); // for packet switching
     virtual void multipath_connect(SwiftSink& sink, simtime_picosec startTime, uint32_t no_of_subflows);
+    virtual void multipath_connect(SwiftSink& sink, simtime_picosec startTime, uint32_t no_of_subflows, uint32_t destination); // for packet switching
     void startflow();
 
     void doNextEvent();
@@ -210,6 +214,8 @@ public:
     vector<const Route*> _paths;
 
     SwiftSink* _sink;
+    uint32_t _destination;
+    uint32_t _addr;
     void set_app_limit(int pktps);
 
 
@@ -261,7 +267,7 @@ private:
     const Route* _route;
 
     // Mechanism
-    void send_ack(simtime_picosec ts);
+    void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src);
 
     SwiftSubflowSrc* _subflow_src;
     SwiftSink& _sink;

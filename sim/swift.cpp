@@ -285,7 +285,7 @@ SwiftSubflowSrc::send_packets() {
     //cout << eventlist().now() << " " << nodename() << " cwnd " << _swift_cwnd << " + " << _inflate << endl;
     if (!_established){
         //send SYN packet and wait for SYN/ACK
-        Packet * p  = SwiftPacket::new_syn_pkt(_flow, *(_route), 0, 1);
+        Packet * p  = SwiftPacket::new_syn_pkt(_flow, *(_route), 0, 1, _src._destination, _src._addr);
         _highest_sent = 0;
 
         p->sendOn();
@@ -376,7 +376,8 @@ SwiftSubflowSrc::send_next_packet() {
 
     _dsn_map[_highest_sent+1] = dsn;
     
-    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss());
+
+    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr);
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << " dsn " << dsn << endl;
     _highest_sent += mss();  
     _packets_sent += mss();
@@ -411,7 +412,7 @@ SwiftSubflowSrc::retransmit_packet() {
     if (!_established){
         assert(_highest_sent == 1);
 
-        Packet* p  = SwiftPacket::new_syn_pkt(_flow, *_route, 1, 1);
+        Packet* p  = SwiftPacket::new_syn_pkt(_flow, *_route, 1, 1, _src._destination, _src._addr);
         p->sendOn();
 
         cout << "Resending SYN, waiting for SYN/ACK" << endl;
@@ -419,7 +420,7 @@ SwiftSubflowSrc::retransmit_packet() {
     }
     SwiftPacket::seq_t dsn = _dsn_map[_last_acked+1];
     //cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
-    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss());
+    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr);
 
     p->flow().logTraffic(*p, _src, TrafficLogger::PKT_CREATESEND);
     p->set_ts(eventlist().now());
@@ -637,6 +638,13 @@ SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, Traff
     _fs_beta = - _fs_alpha / sqrt(_fs_max_cwnd);
 }
 
+SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* pktlogger, 
+                   EventList &eventlst, uint32_t addr) 
+    : SwiftSrc(rtx_scanner, logger, pktlogger, eventlst)
+{
+    _addr = addr;
+}
+
 void
 SwiftSrc::log(SwiftSubflowSrc* sub, SwiftLogger::SwiftEvent event) {
     if (_logger) 
@@ -759,6 +767,13 @@ SwiftSrc::connect(const Route& routeout, const Route& routeback, SwiftSink& sink
 }
 
 void 
+SwiftSrc::connect(const Route& routeout, const Route& routeback, SwiftSink& sink, 
+                  simtime_picosec starttime, uint32_t destination) {
+    _destination = destination;
+    connect(routeout, routeback, sink, starttime);
+}
+
+void 
 SwiftSrc::multipath_connect(SwiftSink& sink, simtime_picosec starttime, uint32_t no_of_subflows) {
     _sink=&sink;
     for (uint32_t i = 0; i < no_of_subflows; i++) {
@@ -776,6 +791,12 @@ SwiftSrc::multipath_connect(SwiftSink& sink, simtime_picosec starttime, uint32_t
     }
     eventlist().sourceIsPending(*this,starttime);
     // cout << "starttime " << timeAsUs(starttime) << endl;
+}
+
+void 
+SwiftSrc::multipath_connect(SwiftSink& sink, simtime_picosec starttime, uint32_t no_of_subflows, uint32_t destination) {
+    _destination = destination;
+    multipath_connect(sink, starttime, no_of_subflows);
 }
 
 #define ABS(X) ((X)>0?(X):-(X))
@@ -952,18 +973,19 @@ SwiftSubflowSink::receivePacket(Packet& pkt) {
     }
 
     _sink.receivePacket(pkt);
+    uint32_t src = p->src();
+    uint32_t dst = p->dst();
     p->free();
 
     // whatever the cumulative ack does (eg filling holes), the echoed TS is always from
     // the packet we just received
-    send_ack(ts);
+    send_ack(ts, src, dst);
 }
 
 void 
-SwiftSubflowSink::send_ack(simtime_picosec ts) {
+SwiftSubflowSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src) {
     const Route* rt = _route;
-    
-    SwiftAck *ack = SwiftAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts);
+    SwiftAck *ack = SwiftAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src);
 
     ack->flow().logTraffic(*ack,*this,TrafficLogger::PKT_CREATESEND);
     ack->sendOn();

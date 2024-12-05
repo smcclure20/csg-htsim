@@ -74,7 +74,8 @@ public:
 
     void init_network();
     virtual vector<const Route*>* get_bidir_paths(uint32_t src, uint32_t dest, bool reverse);
-    Route* setup_tor_route(uint32_t hostnum, flowid_t flow_id, PacketSink* host);
+    Route* get_tor_route(uint32_t hostnum);
+    void add_host_port(uint32_t hostnum, flowid_t flow_id, PacketSink* host);
 
     BaseQueue* alloc_src_queue(QueueLogger* q);
     BaseQueue* alloc_queue(QueueLogger* q, mem_b queuesize, link_direction dir, int switch_tier, bool tor);

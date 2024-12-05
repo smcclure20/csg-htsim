@@ -17,19 +17,22 @@ public:
     typedef uint64_t seq_t;
 
     inline static SwiftPacket* newpkt(PacketFlow &flow, const Route &route, 
-                                      seq_t seqno, seq_t dsn, int size) {
+                                      seq_t seqno, seq_t dsn, int size, uint32_t dst, uint32_t src) {
         SwiftPacket* p = _packetdb.allocPacket();
         p->set_route(flow,route,size,seqno+size-1); // The Swift sequence number is the first byte of the packet; I will ID the packet by its last byte.
         p->_type = SWIFT;
         p->_seqno = seqno;
         p->_dsn = dsn;
         p->_syn = false;
+        p->set_dst(dst);
+        p->set_src(src);
+        p->_direction = NONE;
         return p;
     }
 
     inline static SwiftPacket* new_syn_pkt(PacketFlow &flow, const Route &route, 
-                                           seq_t seqno, int size) {
-        SwiftPacket* p = newpkt(flow,route,seqno,0,size);
+                                           seq_t seqno, int size, uint32_t dst, uint32_t src) {
+        SwiftPacket* p = newpkt(flow,route,seqno,0,size,dst,src);
         p->_syn = true;
         return p;
     }
@@ -56,7 +59,7 @@ public:
 
     inline static SwiftAck* newpkt(PacketFlow &flow, const Route &route, 
                                    seq_t seqno, seq_t ackno, seq_t ds_ackno,
-                                   simtime_picosec ts_echo) {
+                                   simtime_picosec ts_echo, uint32_t dst, uint32_t src) {
         SwiftAck* p = _packetdb.allocPacket();
         p->set_route(flow,route,ACKSIZE,ackno);
         p->_type = SWIFTACK;
@@ -64,6 +67,9 @@ public:
         p->_ackno = ackno;
         p->_ds_ackno = ds_ackno;
         p->_ts_echo = ts_echo;
+        p->set_src(src);
+        p->set_dst(dst);
+        p->_direction = NONE;
         return p;
     }
 

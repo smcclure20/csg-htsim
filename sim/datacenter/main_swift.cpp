@@ -47,7 +47,7 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 #define USE_FIRST_FIT 0
 #define FIRST_FIT_INTERVAL 100
 
-enum NetRouteStrategy {NOT_SET= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
+enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
 EventList eventlist;
 
@@ -60,7 +60,7 @@ void exit_error(char* progr) {
 
 int main(int argc, char **argv) {
     Clock c(timeFromSec(5 / 100.), eventlist);
-    uint32_t no_of_conns = DEFAULT_NODES, cwnd = 15, no_of_nodes = DEFAULT_NODES,flowsize = 0;
+    uint32_t cwnd = 15, no_of_nodes = DEFAULT_NODES;
     mem_b queuesize = DEFAULT_QUEUE_SIZE;
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     simtime_picosec endtime = timeFromMs(1.2);
     char* tm_file = NULL;
     char* topo_file = NULL;
-    NetRouteStrategy route_strategy = NOT_SET;
+    NetRouteStrategy route_strategy = SOURCE_ROUTE;
 
     int i = 1;
     filename << "logout.dat";
@@ -81,9 +81,6 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i],"-o")){
             filename.str(std::string());
             filename << argv[i+1];
-            i++;
-        } else if (!strcmp(argv[i],"-conns")){
-            no_of_conns = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-nodes")){
             no_of_nodes = atoi(argv[i+1]);
@@ -98,9 +95,6 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-cwnd")){
             cwnd = atoi(argv[i+1]);
-            i++;
-        } else if (!strcmp(argv[i],"-flowsize")){
-            flowsize = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-linkspeed")){
             // linkspeed specified is in Mbps
@@ -174,11 +168,8 @@ int main(int argc, char **argv) {
     queuesize = queuesize*Packet::data_packet_size();
     srand(13);
       
-
-    cout << "conns " << no_of_conns << endl;
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
-    cout << "flowsize " << flowsize << endl;
     cout << "mtu " << packet_size << endl;
     cout << "plb " << plb << endl;
     cout << "hostspray " << hostspray << endl;
@@ -316,20 +307,20 @@ int main(int argc, char **argv) {
             net_paths[dest][src] = paths;
         }
 
-        swiftSrc = new SwiftSrc(swiftRtxScanner, NULL, NULL, eventlist);
+        swiftSrc = new SwiftSrc(swiftRtxScanner, NULL, NULL, eventlist, src);
         swiftSrc->set_cwnd(cwnd*Packet::data_packet_size());
-
-        if (flowsize){
-            swiftSrc->set_flowsize(flowsize*Packet::data_packet_size());
-        }
+                        
+        if (crt->size>0){
+            swiftSrc->set_flowsize(crt->size);
+        } 
                 
-        swift_srcs.push_back(swiftSrc);
         if (plb) {
             swiftSrc->enable_plb();
         }
         if (hostspray) {
             swiftSrc->set_switch_spraying();
         }
+        swift_srcs.push_back(swiftSrc);
         swiftSnk = new SwiftSink();
         //ReorderBufferLoggerSampling* buf_logger = new ReorderBufferLoggerSampling(timeFromMs(0.01), eventlist);
         //logfile.addLogger(*buf_logger);
@@ -346,16 +337,10 @@ int main(int argc, char **argv) {
         logfile.writeName(*swiftSnk);
           
         //swiftRtxScanner.registerSwift(*swiftSrc);
-
-        Route* routeout, *routein;
-        if (route_strategy != NOT_SET) {
-            for (SwiftSubflowSrc* sub : swiftSrc->subflows()) {
-                routeout = top->setup_tor_route(src,sub->flow().flow_id(),sub); // TODO: figure out the flowid thing
-                routein = top->setup_tor_route(dest,sub->flow().flow_id(),swiftSnk);
-            }
-            // swiftSrc->connect(*routeout, *routein, *swiftSnk, crt->start);
-        }
-        else {
+        if (route_strategy != SOURCE_ROUTE) {
+            routeout = top->get_tor_route(src);
+            routein = top->get_tor_route(dest);
+        } else {
             uint32_t choice = 0;
           
 #ifdef FAT_TREE
@@ -424,13 +409,20 @@ int main(int argc, char **argv) {
         }
 
         if (no_of_subflows == 1) {
-            swiftSrc->connect(*routeout, *routein, *swiftSnk, timeFromUs((uint32_t)crt->start));
+            swiftSrc->connect(*routeout, *routein, *swiftSnk, timeFromUs((uint32_t)crt->start), dest);
         }
         swiftSrc->set_paths(net_paths[src][dest]);
         if (no_of_subflows > 1) {
             // could probably use this for single-path case too, but historic reasons
             cout << "will start subflow " << c << " at " << crt->start << endl;
-            swiftSrc->multipath_connect(*swiftSnk, timeFromUs((uint32_t)crt->start), no_of_subflows);
+            swiftSrc->multipath_connect(*swiftSnk, timeFromUs((uint32_t)crt->start), no_of_subflows, dest);
+        }
+
+        if (route_strategy != SOURCE_ROUTE) {
+            for (SwiftSubflowSrc* sub : swiftSrc->subflows()) {
+                top->add_host_port(src, sub->flow().flow_id(), sub);
+                top->add_host_port(dest, sub->flow().flow_id(), swiftSnk);
+            }
         }
           
         sinkLogger.monitorSink(swiftSnk);
@@ -453,6 +445,7 @@ int main(int argc, char **argv) {
     //(*(swift_srcs.begin()))->log_me();
 
     // GO!
+    cout << "Starting simulation" << endl;
     while (eventlist.doNextEvent()) {
     }
 
