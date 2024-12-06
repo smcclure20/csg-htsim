@@ -119,7 +119,7 @@ SwiftSubflowSrc::adjust_cwnd(simtime_picosec delay, SwiftAck::seq_t ackno) {
         if (now - _last_good_path > _plb_interval) {
             cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
             _last_good_path = now;
-            move_path();
+            move_path_flow_label();
         }
     }
     /*
@@ -285,7 +285,7 @@ SwiftSubflowSrc::send_packets() {
     //cout << eventlist().now() << " " << nodename() << " cwnd " << _swift_cwnd << " + " << _inflate << endl;
     if (!_established){
         //send SYN packet and wait for SYN/ACK
-        Packet * p  = SwiftPacket::new_syn_pkt(_flow, *(_route), 0, 1, _src._destination, _src._addr);
+        Packet * p  = SwiftPacket::new_syn_pkt(_flow, *(_route), 0, 1, _src._destination, _src._addr, _pathid);
         _highest_sent = 0;
 
         p->sendOn();
@@ -377,7 +377,7 @@ SwiftSubflowSrc::send_next_packet() {
     _dsn_map[_highest_sent+1] = dsn;
     
 
-    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr);
+    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr, _pathid);
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << " dsn " << dsn << endl;
     _highest_sent += mss();  
     _packets_sent += mss();
@@ -387,8 +387,8 @@ SwiftSubflowSrc::send_next_packet() {
     p->sendOn();
     _pacer.just_sent();
 
-    if (_src.switch_spraying()) { // switch path on every packet (TODO: update to be more like how NDP does this)
-        move_path(true);
+    if (_src.spraying()) { // switch path on every packet
+        move_path_flow_label();
     }
 
     return true;
@@ -412,7 +412,7 @@ SwiftSubflowSrc::retransmit_packet() {
     if (!_established){
         assert(_highest_sent == 1);
 
-        Packet* p  = SwiftPacket::new_syn_pkt(_flow, *_route, 1, 1, _src._destination, _src._addr);
+        Packet* p  = SwiftPacket::new_syn_pkt(_flow, *_route, 1, 1, _src._destination, _src._addr, _pathid);
         p->sendOn();
 
         cout << "Resending SYN, waiting for SYN/ACK" << endl;
@@ -420,7 +420,7 @@ SwiftSubflowSrc::retransmit_packet() {
     }
     SwiftPacket::seq_t dsn = _dsn_map[_last_acked+1];
     //cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
-    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr);
+    SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid);
 
     p->flow().logTraffic(*p, _src, TrafficLogger::PKT_CREATESEND);
     p->set_ts(eventlist().now());
@@ -559,6 +559,12 @@ SwiftSubflowSrc::connect(SwiftSink& sink, const Route& routeout, const Route& ro
 }
 
 void
+SwiftSubflowSrc::move_path_flow_label() {
+    cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
+    _pathid++;
+}
+
+void
 SwiftSubflowSrc::move_path(bool permit_cycles) {
     cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     if (_src._paths.size() == 0) {
@@ -602,6 +608,7 @@ SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, Traff
                    EventList &eventlst)
     : EventSource(eventlst,"swift"),  _logger(logger), _traffic_logger(pktlogger), _rtx_timer_scanner(&rtx_scanner)
 {
+    // TODO @smcclure20: (1) check plb implementation, (2) move all route stuff to a source-routing bool
     _mss = Packet::data_packet_size();
     _scheduler = NULL;
     _maxcwnd = 0xffffffff;//200*_mss;
@@ -623,6 +630,7 @@ SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, Traff
 
     // PLB init
     _plb = false; // enable using enable_plb()
+    _spraying = false;
 
     // flow scaling
     _fs_range = 5 * _base_delay;
@@ -975,17 +983,18 @@ SwiftSubflowSink::receivePacket(Packet& pkt) {
     _sink.receivePacket(pkt);
     uint32_t src = p->src();
     uint32_t dst = p->dst();
+    uint32_t pathid = p->pathid();
     p->free();
 
     // whatever the cumulative ack does (eg filling holes), the echoed TS is always from
     // the packet we just received
-    send_ack(ts, src, dst);
+    send_ack(ts, src, dst, pathid);
 }
 
 void 
-SwiftSubflowSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src) {
+SwiftSubflowSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid) {
     const Route* rt = _route;
-    SwiftAck *ack = SwiftAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src);
+    SwiftAck *ack = SwiftAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src, pathid);
 
     ack->flow().logTraffic(*ack,*this,TrafficLogger::PKT_CREATESEND);
     ack->sendOn();

@@ -53,6 +53,7 @@ public:
     void adjust_cwnd(simtime_picosec delay, SwiftAck::seq_t ackno);
     void applySwiftLimits();
     void handle_ack(SwiftAck::seq_t ackno);
+    void move_path_flow_label();
     void move_path(bool permit_cycles = false);
     void reroute(const Route &route);
     void doNextEvent();
@@ -97,6 +98,9 @@ protected:
     uint32_t _drops;
     simtime_picosec _RFC2988_RTO_timeout;
     bool _rtx_timeout_pending;
+
+    // Flow stuff
+    uint32_t _pathid;
 
     // Connectivity
     PacketFlow _flow;
@@ -173,9 +177,9 @@ SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* 
     inline bool plb() const {return _plb;}
 
     // packet switching
-    bool _switch_spraying;
-    void set_switch_spraying() {_switch_spraying = true;}
-    inline bool switch_spraying() const {return _switch_spraying;}
+    bool _spraying;
+    void set_spraying() {_spraying = true;}
+    inline bool spraying() const {return _spraying;}
 
 
     // should really be private, but loggers want to see:
@@ -267,7 +271,7 @@ private:
     const Route* _route;
 
     // Mechanism
-    void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src);
+    void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid);
 
     SwiftSubflowSrc* _subflow_src;
     SwiftSink& _sink;
