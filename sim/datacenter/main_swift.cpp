@@ -49,6 +49,8 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 
 enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
+enum HostLBStrategy {NONE = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced spraying (tracking EVs)
+
 EventList eventlist;
 
 Logfile* lg;
@@ -65,14 +67,13 @@ int main(int argc, char **argv) {
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
     uint32_t packet_size = 4000;
-    bool plb = false;
-    bool hostspray = false;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
     simtime_picosec endtime = timeFromMs(1.2);
     char* tm_file = NULL;
     char* topo_file = NULL;
     NetRouteStrategy route_strategy = SOURCE_ROUTE;
+    HostLBStrategy host_lb = NONE;
 
     int i = 1;
     filename << "logout.dat";
@@ -115,28 +116,15 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
-        } else if (!strcmp(argv[i],"-plb")){
-            if (strcmp(argv[i+1], "off") == 0) {
-                plb = false;
-            } else if (strcmp(argv[i+1], "on") == 0) {
-                plb = true;
+        } else if (!strcmp(argv[i],"-hostlb")){
+            if (!strcmp(argv[i+1], "spray")) {
+                host_lb = SPRAY;
+            } else if (!strcmp(argv[i+1], "plb")) {
+                host_lb = PLB;
             } else {
                 exit_error(argv[0]);
             }
-            i++;            
-        } else if (!strcmp(argv[i],"-hostspray")){
-            if (strcmp(argv[i+1], "off") == 0) {
-                hostspray = false;
-            } else if (strcmp(argv[i+1], "on") == 0) {
-                hostspray = true;
-                if (plb) {
-                    cout << "Spraying and PLB cannot be enabled at the same time" << endl;
-                    exit(1);
-                }
-            } else {
-                exit_error(argv[0]);
-            }
-            i++;            
+            i++;
         } else if (!strcmp(argv[i],"-strat")){
             if (!strcmp(argv[i+1], "ecmp")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
@@ -171,8 +159,7 @@ int main(int argc, char **argv) {
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
     cout << "mtu " << packet_size << endl;
-    cout << "plb " << plb << endl;
-    cout << "hostspray " << hostspray << endl;
+    cout << "hoststrat " << host_lb << endl;
     cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
       
@@ -314,11 +301,10 @@ int main(int argc, char **argv) {
             swiftSrc->set_flowsize(crt->size);
         } 
                 
-        if (plb) {
+        if (host_lb == PLB) {
             swiftSrc->enable_plb();
-        }
-        if (hostspray) {
-            swiftSrc->set_switch_spraying();
+        } else if (host_lb == SPRAY) {
+            swiftSrc->set_spraying();
         }
         swift_srcs.push_back(swiftSrc);
         swiftSnk = new SwiftSink();
