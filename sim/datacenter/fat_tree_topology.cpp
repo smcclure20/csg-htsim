@@ -1132,7 +1132,7 @@ vector<const Route*>* FatTreeTopology::get_bidir_paths(uint32_t src, uint32_t de
                 }
             }
         }
-        cout << "pathcount " << paths->size() << endl;
+        // cout << "pathcount " << paths->size() << endl;
         return paths;
     } else {
         assert(_tiers == 3);
@@ -1248,7 +1248,7 @@ vector<const Route*>* FatTreeTopology::get_bidir_paths(uint32_t src, uint32_t de
                 }
             }
         }
-        cout << "pathcount " << paths->size() << endl;
+        // cout << "pathcount " << paths->size() << endl;
         return paths;
     }
 }

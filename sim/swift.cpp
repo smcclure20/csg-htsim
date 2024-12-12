@@ -282,7 +282,7 @@ int
 SwiftSubflowSrc::send_packets() {
     uint32_t c = _swift_cwnd + _inflate;
     int sent_count = 0;
-    //cout << eventlist().now() << " " << nodename() << " cwnd " << _swift_cwnd << " + " << _inflate << endl;
+    // cout << eventlist().now() << " " << nodename() << " cwnd " << _swift_cwnd << " + " << _inflate << endl;
     if (!_established){
         //send SYN packet and wait for SYN/ACK
         Packet * p  = SwiftPacket::new_syn_pkt(_flow, *(_route), 0, 1, _src._destination, _src._addr, _pathid);
@@ -368,20 +368,27 @@ SwiftSubflowSrc::send_next_packet() {
     // keep track of DSN associated with SeqNo, so we can retransmit
     SwiftPacket::seq_t dsn;
     if (_src.more_data_available()) {
-        dsn = _src.get_next_dsn();
+        // dsn = _src.get_next_dsn();
+        dsn = _src._highest_dsn_sent+1;
     } else {
         // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
         return false;
     }
 
-    _dsn_map[_highest_sent+1] = dsn;
+    if (_dsn_map.size() == 0 || _highest_sent > prev(_dsn_map.end())->first) { // Do not overwrite dsn map when retransmitting after an RTO
+        _dsn_map[_highest_sent+1] = dsn;
+        _src._highest_dsn_sent += mss();
+    } else {
+        dsn = _dsn_map[_highest_sent+1];
+    }
+    
     
 
     SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr, _pathid);
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << " dsn " << dsn << endl;
     _highest_sent += mss();  
     _packets_sent += mss();
-
+    
     p->flow().logTraffic(*p, _src, TrafficLogger::PKT_CREATESEND);
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -945,12 +952,13 @@ SwiftSubflowSink::receivePacket(Packet& pkt) {
     pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_RCVDESTROY);
 
     _packets+= p->size();
+    SwiftPacket::seq_t dsn = p->dsn();
 
     if (seqno == _cumulative_ack+1) { // it's the next expected seq no
         _cumulative_ack = seqno + size - 1;
         // are there any additional received packets we can now ack?
-        while (!_received.empty() && (_received.front() == _cumulative_ack+1) ) {
-            _received.pop_front();
+        while (!_received.empty() && (*(_received.begin()) == _cumulative_ack+1) ) {
+            _received.erase(_received.begin());
             _cumulative_ack += size;
         }
     } else if (seqno < _cumulative_ack+1) {
@@ -959,25 +967,26 @@ SwiftSubflowSink::receivePacket(Packet& pkt) {
         cout << "Spurious retransmit received!\n";
     } else {
         // it's not the next expected sequence number
-        if (_received.empty()) {
-            _received.push_front(seqno);
-            //it's a drop - in this simulator there are no reorderings.
-            // [Note: if we ever add multipath, fix this!]
-            _drops += (size + seqno-_cumulative_ack-1)/size;
-        } else if (seqno > _received.back()) {
-            // likely case - new packet above a hole
-            _received.push_back(seqno);
-        } else {
-            // uncommon case - it fills a hole, but not first hole
-            list<uint64_t>::iterator i;
-            for (i = _received.begin(); i != _received.end(); i++) {
-                if (seqno == *i) break; // it's a bad retransmit
-                if (seqno < (*i)) {
-                    _received.insert(i, seqno);
-                    break;
-                }
-            }
-        }
+        _received.insert(seqno);
+        // if (_received.empty()) {
+        //     _received.push_front(seqno);
+        //     //it's a drop - in this simulator there are no reorderings.
+        //     // [Note: if we ever add multipath, fix this!]
+        //     _drops += (size + seqno-_cumulative_ack-1)/size;
+        // } else if (seqno > _received.back()) {
+        //     // likely case - new packet above a hole
+        //     _received.push_back(seqno);
+        // } else {
+        //     // uncommon case - it fills a hole, but not first hole
+        //     list<uint64_t>::iterator i;
+        //     for (i = _received.begin(); i != _received.end(); i++) {
+        //         if (seqno == *i) break; // it's a bad retransmit
+        //         if (seqno < (*i)) {
+        //             _received.insert(i, seqno);
+        //             break;
+        //         }
+        //     }
+        // }
     }
 
     _sink.receivePacket(pkt);

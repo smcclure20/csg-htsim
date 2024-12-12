@@ -221,6 +221,7 @@ class SwiftSinkLoggerSampling : public SinkLoggerSampling {
     static string event_to_str(RawLogEvent& event);
 private:
     vector<vector<SwiftPacket::seq_t> > _last_sub_seq;
+    vector<simtime_picosec> _last_cum_ack_change;
 };
 
 class STrackSinkLoggerSampling : public SinkLoggerSampling {
