@@ -1347,8 +1347,10 @@ void SwiftSinkLoggerSampling::doNextEvent(){
                 _last_sub_seq[i].resize(sink->_subs.size(), 0);
             }
         }
+        _last_cum_ack_change.resize(_sinks.size(), now);
     }
     for (uint64_t i = 0; i<_sinks.size(); i++){
+        simtime_picosec delta_lastchange = now - _last_cum_ack_change[i];
         if (_last_seq[i] <= _sinks[i]->cumulative_ack()) {
             //this deals with resets for periodic sources                                                 
             deltaB = _sinks[i]->cumulative_ack() - _last_seq[i];
@@ -1362,6 +1364,9 @@ void SwiftSinkLoggerSampling::doNextEvent(){
                                   deltaB>0?(deltaSnd * 100000 / deltaB):0, rate);
 
             _last_rate[i] = rate;
+        }
+        if (_sinks[i]->cumulative_ack() > _last_seq[i]) {
+            _last_cum_ack_change[i] = now;
         }
         _last_seq[i] = _sinks[i]->cumulative_ack();
 

@@ -63,6 +63,7 @@ public:
     uint32_t drops() const { return _drops;}
     bool send_next_packet();
     virtual void send_callback();  // called by scheduler when it has more space
+    uint64_t last_acked() const {return _last_acked;}
 protected:
     // connection state
     bool _established;
@@ -222,11 +223,14 @@ SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* 
     uint32_t _addr;
     void set_app_limit(int pktps);
 
-
     // Swift helper functions
     simtime_picosec targetDelay(uint32_t cwnd, const Route& route);
 
     int queuesize(int flow_id);
+
+    std::string get_stats(int subflow_id) {
+        return "subflow " + std::to_string(subflow_id) + " sent " + std::to_string(_subs[subflow_id]->_packets_sent) + " bytes, " + std::to_string(_subs[subflow_id]->_drops) + " drops";
+    }
 
 private:
     // Housekeeping
@@ -263,8 +267,7 @@ public:
     uint32_t _drops;
     uint32_t drops();
 
-    list<SwiftAck::seq_t> _received; /* list of packets above a hole, that 
-                                        we've received */
+    set<SwiftAck::seq_t> _received; 
 private:
     // Connectivity
     void connect(SwiftSubflowSrc& src, const Route& route);

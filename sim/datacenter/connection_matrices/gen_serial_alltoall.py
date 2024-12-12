@@ -60,6 +60,7 @@ for group in range(groups):
     print("group: ", group)
     groupsrcs = []
     for n in range(groupsize):
+        print("group: ", group, " n: ", n)
         groupsrcs.append(srcs[group * groupsize + n])
 
     print(groupsrcs)

@@ -49,7 +49,7 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 
 enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
-enum HostLBStrategy {NONE = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced spraying (tracking EVs)
+enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced spraying (tracking EVs)
 
 EventList eventlist;
 
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     char* tm_file = NULL;
     char* topo_file = NULL;
     NetRouteStrategy route_strategy = SOURCE_ROUTE;
-    HostLBStrategy host_lb = NONE;
+    HostLBStrategy host_lb = NOLB;
 
     int i = 1;
     filename << "logout.dat";
@@ -192,7 +192,7 @@ int main(int argc, char **argv) {
 
     Route* routeout, *routein;
 
-    SwiftRtxTimerScanner swiftRtxScanner(timeFromMs(10), eventlist);
+    SwiftRtxTimerScanner swiftRtxScanner(timeFromMs(0.1), eventlist);
    
 #ifdef FAT_TREE
     /*
@@ -271,6 +271,7 @@ int main(int argc, char **argv) {
     list <const Route*> routes;
     
     list <SwiftSrc*> swift_srcs;
+    list <SwiftSink*> swift_sinks;
     // initialize all sources/sinks
 
     uint32_t connID = 0;
@@ -294,7 +295,7 @@ int main(int argc, char **argv) {
             net_paths[dest][src] = paths;
         }
 
-        swiftSrc = new SwiftSrc(swiftRtxScanner, NULL, NULL, eventlist, src);
+        swiftSrc = new SwiftSrc(swiftRtxScanner, NULL, NULL, eventlist, src);  // TODO: add trigger support
         swiftSrc->set_cwnd(cwnd*Packet::data_packet_size());
                         
         if (crt->size>0){
@@ -308,6 +309,7 @@ int main(int argc, char **argv) {
         }
         swift_srcs.push_back(swiftSrc);
         swiftSnk = new SwiftSink();
+        swift_sinks.push_back(swiftSnk);
         //ReorderBufferLoggerSampling* buf_logger = new ReorderBufferLoggerSampling(timeFromMs(0.01), eventlist);
         //logfile.addLogger(*buf_logger);
         //swiftSnk->add_buffer_logger(buf_logger);
@@ -478,14 +480,24 @@ int main(int argc, char **argv) {
 #endif    
 
     /*for (uint32_t i = 0; i < 10; i++)
-        cout << "Hop " << i << " Count " << counts[i] << endl;
+        cout << "Hop " << i << " Count " << counts[i] << endl; */
     list <SwiftSrc*>::iterator src_i;
+    // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
+    //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
+    // }
     for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
-        cout << "Src, sent: " << (*src_i)->_packets_sent << "[new: " << (*src_i)->_new_packets_sent << " rtx: " << (*src_i)->_rtx_packets_sent << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
+        cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
     }
-    for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
-        (*src_i)->print_stats();
-        }*/
+    list <SwiftSink*>::iterator sink_i;
+    for (sink_i = swift_sinks.begin(); sink_i != swift_sinks.end(); sink_i++) {
+        cout << (*sink_i)->nodename() << " received " << (*sink_i)->_cumulative_data_ack << " bytes, " << (*sink_i)->drops() << " drops" << endl;
+        if ((*sink_i)->_cumulative_data_ack < 2004000) {
+            cout << "Incomplete flow " << endl;
+            SwiftSrc* counterpart_src = (*sink_i)->_src;
+            SwiftSubflowSrc* sub = counterpart_src->subflows()[0];
+            cout << "Src, sent: " << counterpart_src->_highest_dsn_sent << "; last acked " << sub->last_acked() << endl;
+        }
+    }
     /*
     uint64_t total_rtt = 0;
     cout << "RTT Histogram";
