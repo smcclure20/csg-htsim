@@ -16,6 +16,7 @@
 #include "queue_lossless_input.h"
 #include "queue_lossless_output.h"
 #include "swift_scheduler.h"
+#include "constant_cca_scheduler.h"
 #include "ecnqueue.h"
 
 // use tokenize from connection matrix
@@ -630,6 +631,8 @@ BaseQueue* FatTreeTopology::alloc_src_queue(QueueLogger* queueLogger){
     switch (_sender_qt) {
     case SWIFT_SCHEDULER:
         return new FairScheduler(linkspeed, *_eventlist, queueLogger);
+    case CONST_SCHEDULER:
+        return new ConstFairScheduler(linkspeed, *_eventlist, queueLogger);
     case PRIORITY:
         return new PriorityQueue(linkspeed,
                                  memFromPkt(FEEDER_BUFFER), *_eventlist, queueLogger);

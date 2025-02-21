@@ -33,8 +33,10 @@ vector<FibEntry*>* RouteTable::getRoutes(int destination){
 
 HostFibEntry* RouteTable::getHostRoute(int destination,int flowid){
     if (_hostfib.find(destination) == _hostfib.end() ||
-        _hostfib[destination]->find(flowid) == _hostfib[destination]->end())
+        _hostfib[destination]->find(flowid) == _hostfib[destination]->end()) {
+            std::cout << "No route found for destination " << destination << " and flowid " << flowid << std::endl;
         return NULL;
+    }
     else {
         return (*_hostfib[destination])[flowid];
     }

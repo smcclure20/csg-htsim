@@ -66,6 +66,7 @@ int main(int argc, char **argv) {
     mem_b queuesize = DEFAULT_QUEUE_SIZE;
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
+    stringstream flowfilename(ios_base::out);
     uint32_t packet_size = 4000;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
@@ -74,14 +75,22 @@ int main(int argc, char **argv) {
     char* topo_file = NULL;
     NetRouteStrategy route_strategy = SOURCE_ROUTE;
     HostLBStrategy host_lb = NOLB;
+    int link_failures = 0;
 
     int i = 1;
-    filename << "logout.dat";
+    filename << "None";
+    flowfilename << "flowlog.csv";
 
     while (i<argc) {
         if (!strcmp(argv[i],"-o")){
             filename.str(std::string());
-            filename << argv[i+1];
+            filename << argv[i+1] << ".out";
+            flowfilename.str(std::string());
+            flowfilename << argv[i+1] << "-flows.csv";
+            i++;
+        } else if (!strcmp(argv[i],"-of")){
+            flowfilename.str(std::string());
+            flowfilename << argv[i+1];
             i++;
         } else if (!strcmp(argv[i],"-nodes")){
             no_of_nodes = atoi(argv[i+1]);
@@ -112,6 +121,9 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-subflows")){
             no_of_subflows = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-fails")){
+            link_failures = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
@@ -167,7 +179,19 @@ int main(int argc, char **argv) {
 
     cout << "Logging to " << filename.str() << endl;
     //Logfile 
-    Logfile logfile(filename.str(), eventlist);
+    lg = NULL;
+    if (strcmp(filename.str().c_str(),"None")) {
+       Logfile logfile(filename.str(), eventlist);
+       lg = &logfile;
+    }
+    
+    // Log of per-flow stats
+    cout << "Logging flows to " << flowfilename.str() << endl;  
+    std::ofstream flowlog(flowfilename.str().c_str());
+    if (!flowlog){
+        cout << "Can't open for writing flow log file!"<<endl;
+        exit(1);
+    }
 
 #if PRINT_PATHS
     filename << ".paths";
@@ -179,53 +203,55 @@ int main(int argc, char **argv) {
     }
 #endif
 
-
-    lg = &logfile;
-
-    logfile.setStartTime(timeFromSec(0));
-    SwiftSinkLoggerSampling sinkLogger = SwiftSinkLoggerSampling(tput_sample_time, eventlist);
-    logfile.addLogger(sinkLogger);
-    SwiftTrafficLogger traffic_logger = SwiftTrafficLogger();
-    logfile.addLogger(traffic_logger);
+    SwiftSinkLoggerSampling* sinkLogger = NULL; 
+    if (lg != NULL) {
+        lg->setStartTime(timeFromSec(0));
+        SwiftSinkLoggerSampling sinkLoggerTemp = SwiftSinkLoggerSampling(tput_sample_time, eventlist);
+        SwiftSinkLoggerSampling* sinkLogger = &sinkLoggerTemp;
+        lg->addLogger(*sinkLogger);
+        SwiftTrafficLogger traffic_logger = SwiftTrafficLogger();
+        lg->addLogger(traffic_logger);
+    }
+    
     SwiftSrc* swiftSrc;
     SwiftSink* swiftSnk;
 
     Route* routeout, *routein;
 
-    SwiftRtxTimerScanner swiftRtxScanner(timeFromMs(0.1), eventlist);
+    SwiftRtxTimerScanner swiftRtxScanner(timeFromUs(0.01), eventlist);
    
 #ifdef FAT_TREE
     /*
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               &logfile, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
+                                               lg, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
     */
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
+                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures);
 #endif
 
 #ifdef OV_FAT_TREE
-    OversubscribedFatTreeTopology* top = new OversubscribedFatTreeTopology(&logfile, &eventlist,ff);
+    OversubscribedFatTreeTopology* top = new OversubscribedFatTreeTopology(lg, &eventlist,ff);
 #endif
 
 #ifdef MH_FAT_TREE
-    MultihomedFatTreeTopology* top = new MultihomedFatTreeTopology(&logfile, &eventlist,ff);
+    MultihomedFatTreeTopology* top = new MultihomedFatTreeTopology(lg, &eventlist,ff);
 #endif
 
 #ifdef STAR
-    StarTopology* top = new StarTopology(&logfile, &eventlist,ff);
+    StarTopology* top = new StarTopology(lg, &eventlist,ff);
 #endif
 
 #ifdef BCUBE
-    BCubeTopology* top = new BCubeTopology(&logfile,&eventlist,ff,COMPOSITE_PRIO);
+    BCubeTopology* top = new BCubeTopology(lg,&eventlist,ff,COMPOSITE_PRIO);
     cout << "BCUBE " << K << endl;
 #endif
 
 #ifdef VL2
-    VL2Topology* top = new VL2Topology(&logfile,&eventlist,ff);
+    VL2Topology* top = new VL2Topology(lg,&eventlist,ff);
 #endif
 
 #ifdef GENERIC_TOPO
-    GenericTopology *top = new GenericTopology(&logfile, &eventlist);
+    GenericTopology *top = new GenericTopology(lg, &eventlist);
     if (topo_file) {
         top->load(topo_file);
     }
@@ -313,16 +339,20 @@ int main(int argc, char **argv) {
         //ReorderBufferLoggerSampling* buf_logger = new ReorderBufferLoggerSampling(timeFromMs(0.01), eventlist);
         //logfile.addLogger(*buf_logger);
         //swiftSnk->add_buffer_logger(buf_logger);
-        sinkLogger.monitorSink(swiftSnk);
 
         swiftSrc->setName("swift_" + ntoa(src) + "_" + ntoa(dest));
-        logfile.writeName(*swiftSrc);
+
+        
 
         if (no_of_subflows>1)
             swiftSnk->setName("mpswift_sink_" + ntoa(src) + "_" + ntoa(dest));
         else
             swiftSnk->setName("swift_sink_" + ntoa(src) + "_" + ntoa(dest));
-        logfile.writeName(*swiftSnk);
+
+        if (lg != NULL) {
+            lg->writeName(*swiftSrc);
+            lg->writeName(*swiftSnk);
+        }
           
         //swiftRtxScanner.registerSwift(*swiftSrc);
         if (route_strategy != SOURCE_ROUTE) {
@@ -397,13 +427,13 @@ int main(int argc, char **argv) {
         }
 
         if (no_of_subflows == 1) {
-            swiftSrc->connect(*routeout, *routein, *swiftSnk, timeFromUs((uint32_t)crt->start), dest);
+            swiftSrc->connect(*routeout, *routein, *swiftSnk, (uint32_t)crt->start, dest);
         }
         swiftSrc->set_paths(net_paths[src][dest]);
         if (no_of_subflows > 1) {
             // could probably use this for single-path case too, but historic reasons
             cout << "will start subflow " << c << " at " << crt->start << endl;
-            swiftSrc->multipath_connect(*swiftSnk, timeFromUs((uint32_t)crt->start), no_of_subflows, dest);
+            swiftSrc->multipath_connect(*swiftSnk, (uint32_t)crt->start, no_of_subflows, dest);
         }
 
         if (route_strategy != SOURCE_ROUTE) {
@@ -413,28 +443,38 @@ int main(int argc, char **argv) {
             }
         }
           
-        sinkLogger.monitorSink(swiftSnk);
+        if (sinkLogger != NULL) {
+            sinkLogger->monitorSink(swiftSnk);
+        }
     }
     //    ShortFlows* sf = new ShortFlows(2560, eventlist, net_paths,conns,lg, &swiftRtxScanner);
 
     cout << "Loaded " << connID << " connections in total\n";
 
     // Record the setup
-    uint32_t pktsize = Packet::data_packet_size();
-    logfile.write("# pktsize=" + ntoa(pktsize) + " bytes");
-    //    logfile.write("# subflows=" + ntoa(subflow_count));
-    logfile.write("# hostnicrate = " + ntoa(linkspeed/1000000) + " Mbps");
-    logfile.write("# corelinkrate = " + ntoa(HOST_NIC*CORE_TO_HOST) + " pkt/sec");
-    //logfile.write("# buffer = " + ntoa((double) (queues_na_ni[0][1]->_maxsize) / ((double) pktsize)) + " pkt");
-    double rtt = timeAsSec(timeFromUs(RTT));
-    logfile.write("# rtt =" + ntoa(rtt));
+    if (lg != NULL) {
+        uint32_t pktsize = Packet::data_packet_size();
+        lg->write("# pktsize=" + ntoa(pktsize) + " bytes");
+        //    logfile.write("# subflows=" + ntoa(subflow_count));
+        lg->write("# hostnicrate = " + ntoa(linkspeed/1000000) + " Mbps");
+        lg->write("# corelinkrate = " + ntoa(HOST_NIC*CORE_TO_HOST) + " pkt/sec");
+        //logfile.write("# buffer = " + ntoa((double) (queues_na_ni[0][1]->_maxsize) / ((double) pktsize)) + " pkt");
+        double rtt = timeAsSec(timeFromUs(RTT));
+        lg->write("# rtt =" + ntoa(rtt));
+    }
+    
 
     // enable logging on the first source - for debugging purposes
     //(*(swift_srcs.begin()))->log_me();
 
     // GO!
     cout << "Starting simulation" << endl;
+    simtime_picosec checkpoint = timeFromUs(100.0);
     while (eventlist.doNextEvent()) {
+        if (eventlist.now() > checkpoint) {
+            cout << "Simulation time " << timeAsUs(eventlist.now()) << endl;
+            checkpoint += timeFromUs(100.0);
+        }
     }
 
     cout << "Done" << endl;
@@ -485,9 +525,13 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
+    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes" << endl;
     for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
+        SwiftSink* sink = (*src_i)->_sink;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << (*src_i)->_completion_time - (*src_i)->_start_time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack <<  endl;
         cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
     }
+    flowlog.close();
     list <SwiftSink*>::iterator sink_i;
     for (sink_i = swift_sinks.begin(); sink_i != swift_sinks.end(); sink_i++) {
         cout << (*sink_i)->nodename() << " received " << (*sink_i)->_cumulative_data_ack << " bytes, " << (*sink_i)->drops() << " drops" << endl;

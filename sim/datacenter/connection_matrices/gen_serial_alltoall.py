@@ -12,7 +12,7 @@
 
 import os
 import sys
-from random import seed, shuffle
+from random import seed, shuffle, uniform
 #print(sys.argv)
 if len(sys.argv) != 8:
     print("Usage: python gen_serial_alltoall.py <filename> <nodes> <conns> <groupsize> <flowsize> <extrastarttime> <randseed>")
@@ -39,7 +39,7 @@ print("Random Seed ", randseed)
 f = open(filename, "w")
 print("Nodes", nodes, file=f)
 print("Connections", conns*(groupsize-1), file=f)
-print("Triggers", conns*(groupsize-2), file=f)
+# print("Triggers", conns*(groupsize-2), file=f)
 
 srcs = []
 dsts = []
@@ -69,18 +69,19 @@ for group in range(groups):
             id += 1
             dst = (s+d)%groupsize
             out = str(groupsrcs[s]) + "->" + str(groupsrcs[dst]) + " id " + str(id)
-            if d == 1:
-                out = out + " start " + str(int(extrastarttime * 1000000))
-            else:
-                out = out + " trigger " + str(trig_id)
-                trig_id += 1
+            out = out + " start " + str(int(uniform(0, extrastarttime * 1000000)))
+            # if d == 1:
+            #     out = out + " start " + str(int(extrastarttime * 1000000))
+            # else:
+            #     out = out + " trigger " + str(trig_id)
+            #     trig_id += 1
             out = out + " size " + str(flowsize)
-            if d != groupsize - 1:
-                out = out + " send_done_trigger " + str(trig_id)
+            # if d != groupsize - 1:
+            #     out = out + " send_done_trigger " + str(trig_id)
             print(out, file=f)
             print(groupsrcs[s], "->", groupsrcs[dst])
-for t in range(1, trig_id):
-    out = "trigger id " + str(t) + " oneshot"
-    print(out, file=f)
+# for t in range(1, trig_id):
+#     out = "trigger id " + str(t) + " oneshot"
+#     print(out, file=f)
 
 f.close()

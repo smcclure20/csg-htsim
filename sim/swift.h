@@ -99,6 +99,7 @@ protected:
     uint32_t _drops;
     simtime_picosec _RFC2988_RTO_timeout;
     bool _rtx_timeout_pending;
+    uint32_t _rto_count;
 
     // Flow stuff
     uint32_t _pathid;
@@ -192,6 +193,12 @@ SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* 
     int32_t _app_limited;
     uint32_t drops();
 
+    uint32_t rtos();
+
+    // stats
+    simtime_picosec _completion_time;
+    simtime_picosec _start_time;
+
     uint16_t _mss;
     inline uint16_t mss() const {return _mss;}
     inline double ai() const {return _ai;}
@@ -267,6 +274,9 @@ public:
     uint32_t _drops;
     uint32_t drops();
 
+    // stats
+    uint32_t spurious_retransmits;
+
     set<SwiftAck::seq_t> _received; 
 private:
     // Connectivity
@@ -304,6 +314,7 @@ public:
     SwiftSrc* _src;
     uint64_t cumulative_ack();
     uint32_t drops();
+    uint32_t spurious_retransmits();
 
     vector <SwiftSubflowSink*> _subs; // public so the logger can see
 private:
