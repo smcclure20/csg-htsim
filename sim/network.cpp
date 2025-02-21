@@ -237,6 +237,12 @@ Packet::str() const {
     case EQDSRTS:
         s = "EQDSRTS";
         break;
+    case CONSTCCA:
+        s = "CONSTCCA";
+        break;
+    case CONSTCCAACK:
+        s = "CONSTCCAACK";
+        break;
     }
     return s;
 }

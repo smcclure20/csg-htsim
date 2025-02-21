@@ -28,6 +28,7 @@ SwiftSubflowSrc::SwiftSubflowSrc(SwiftSrc& src, TrafficLogger* pktlogger, int su
     _in_fast_recovery = false;
     _inflate = 0;
     _drops = 0;
+    _rto_count = 0;
 
     // swift cc init
     _swift_cwnd = _default_cwnd;  // initial window, in bytes  Note: values in paper are in packets; we're maintaining in bytes.
@@ -241,7 +242,7 @@ SwiftSubflowSrc::handle_ack(SwiftAck::seq_t ackno) {
         if (_inflate > _swift_cwnd) {
             // this is probably bad
             _inflate = _swift_cwnd;
-            cout << "hit inflate limit" << endl;
+            // cout << "hit inflate limit" << endl;
         }
         _src.log(this, SwiftLogger::SWIFT_RCV_DUP_FR);
         send_packets();
@@ -332,7 +333,7 @@ SwiftSubflowSrc::send_packets() {
         }
     }
 
-    while ((_last_acked + c >= _highest_sent + mss()) && _src.more_data_available()) {
+    while ((_last_acked + c >= _highest_sent + mss()) && (_src.more_data_available() || (_highest_sent < _recoverq) || (_last_acked < _src._flow_size))) { // this is wrong for multipath
 
         if (_pacer.is_pending()) {
             //Our cwnd is now greater than one packet and we've passed
@@ -370,18 +371,19 @@ SwiftSubflowSrc::send_next_packet() {
     if (_src.more_data_available()) {
         // dsn = _src.get_next_dsn();
         dsn = _src._highest_dsn_sent+1;
+    } else if ((_highest_sent < _recoverq) || (_last_acked < _src._flow_size)) {
+        dsn = _dsn_map[_highest_sent+1];
     } else {
         // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
         return false;
     }
 
-    if (_dsn_map.size() == 0 || _highest_sent > prev(_dsn_map.end())->first) { // Do not overwrite dsn map when retransmitting after an RTO
+    if (_dsn_map.size() == 0 || _highest_sent+1 > (uint64_t) prev(_dsn_map.end())->first) { // Do not overwrite dsn map when retransmitting after an RTO
         _dsn_map[_highest_sent+1] = dsn;
         _src._highest_dsn_sent += mss();
     } else {
         dsn = _dsn_map[_highest_sent+1];
     }
-    
     
 
     SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr, _pathid);
@@ -415,7 +417,6 @@ SwiftSubflowSrc::send_callback() {
 
 void 
 SwiftSubflowSrc::retransmit_packet() {
-    cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     if (!_established){
         assert(_highest_sent == 1);
 
@@ -425,6 +426,10 @@ SwiftSubflowSrc::retransmit_packet() {
         cout << "Resending SYN, waiting for SYN/ACK" << endl;
         return;        
     }
+    if (_last_acked >= _src._flow_size) {
+        return;
+    }
+    // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     SwiftPacket::seq_t dsn = _dsn_map[_last_acked+1];
     //cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
     SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid);
@@ -486,10 +491,15 @@ SwiftSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec period) {
     if (_highest_sent == 0) 
         return;
 
-    cout << timeAsUs(eventlist().now()) << " " << nodename() << " At " << now/(double)1000000000<< " RTO " << _rto/1000000000 << " MDEV " 
-         << _mdev/1000000000 << " RTT "<< _rtt/1000000000 << " SEQ " << _last_acked / mss() << " HSENT "  << _highest_sent 
-         << " CWND "<< _swift_cwnd/mss() << " FAST RECOVERY? " <<         _in_fast_recovery << " Flow ID " 
-         << str()  << endl;
+    if (_last_acked >= _src._flow_size) 
+        return;
+
+    // cout << timeAsUs(eventlist().now()) << " " << nodename() << " At " << now/(double)1000000000<< " RTO " << _rto/1000000000 << " MDEV " 
+    //      << _mdev/1000000000 << " RTT "<< _rtt/1000000000 << " SEQ " << _last_acked / mss() << " HSENT "  << _highest_sent << " LASTACKED " << _last_acked 
+    //      << " CWND "<< _swift_cwnd/mss() << " FAST RECOVERY? " <<         _in_fast_recovery << " Flow ID " 
+    //      <<  _src.get_id() << endl;
+
+    _rto_count++;
 
     // here we can run into phase effects because the timer is checked
     // only periodically for ALL flows but if we keep the difference
@@ -520,6 +530,10 @@ SwiftSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec period) {
 }
 
 void SwiftSubflowSrc::doNextEvent() {
+    if(_last_acked >= _src._flow_size) {
+        _RFC2988_RTO_timeout = timeInf;
+        return;
+    }
     if(_rtx_timeout_pending) {
         _rtx_timeout_pending = false;
 
@@ -549,6 +563,10 @@ void SwiftSubflowSrc::doNextEvent() {
             _swift_cwnd *= (1.0 -_src._max_mdf);
         }
 
+        if (_swift_cwnd < _src._min_cwnd) {
+            _swift_cwnd = _src._min_cwnd;
+        }
+
         retransmit_packet();
     }
 }
@@ -567,7 +585,7 @@ SwiftSubflowSrc::connect(SwiftSink& sink, const Route& routeout, const Route& ro
 
 void
 SwiftSubflowSrc::move_path_flow_label() {
-    cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
+    // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
 }
 
@@ -624,6 +642,7 @@ SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, Traff
     _stopped = false;
     _app_limited = -1;
     _highest_dsn_sent = 0;
+    _completion_time = 0;
 
     // swift cc init
     _ai = 1.0;  // increase constant.  Value is a guess
@@ -779,6 +798,7 @@ SwiftSrc::connect(const Route& routeout, const Route& routeback, SwiftSink& sink
 
     eventlist().sourceIsPending(*this,starttime);
     // cout << "starttime " << timeAsUs(starttime) << endl;
+    _start_time = starttime;
 }
 
 void 
@@ -840,7 +860,8 @@ SwiftSrc::targetDelay(uint32_t cwnd, const Route& route) {
 
 void SwiftSrc::update_dsn_ack(SwiftAck::seq_t ds_ackno) {
     //cout << "Flow " << _name << " dsn ack " << ds_ackno << endl;
-    if (ds_ackno >= _flow_size){
+    if (ds_ackno >= _flow_size && _completion_time == 0){
+        _completion_time = eventlist().now();
         cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
     }
 }
@@ -852,6 +873,15 @@ SwiftSrc::drops() {
         drops += _subs[i]->_drops;
     }
     return drops;
+}
+
+uint32_t
+SwiftSrc::rtos() {
+    int rtos = 0;
+    for (size_t i = 0; i < _subs.size(); i++) {
+        rtos += _subs[i]->_rto_count;
+    }
+    return rtos;
 }
 
 
@@ -938,6 +968,7 @@ SwiftSubflowSink::connect(SwiftSubflowSrc& src, const Route& route_back) {
     _route = rt;
     _cumulative_ack = 0;
     _drops = 0;
+    spurious_retransmits = 0;
 }
 
 // Note: _cumulative_ack is the last byte we've ACKed.
@@ -964,7 +995,8 @@ SwiftSubflowSink::receivePacket(Packet& pkt) {
     } else if (seqno < _cumulative_ack+1) {
         // it is before the next expected sequence - must be a spurious retransmit.
         // We want to see if this happens - it generally shouldn't
-        cout << "Spurious retransmit received!\n";
+        // cout << "Spurious retransmit received!\n";
+        spurious_retransmits++;
     } else {
         // it's not the next expected sequence number
         _received.insert(seqno);
@@ -1088,6 +1120,14 @@ SwiftSink::cumulative_ack() {
 uint32_t
 SwiftSink::drops(){
     return _src ? _src->drops() : 0;
+}
+
+uint32_t SwiftSink::spurious_retransmits() {
+    uint32_t spurious_retransmits = 0;
+    for (size_t i = 0; i < _subs.size(); i++) {
+        spurious_retransmits += _subs[i]->spurious_retransmits;
+    }
+    return spurious_retransmits;
 }
 
 ////////////////////////////////////////////////////////////////
