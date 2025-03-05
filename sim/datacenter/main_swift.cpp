@@ -475,6 +475,21 @@ int main(int argc, char **argv) {
             cout << "Simulation time " << timeAsUs(eventlist.now()) << endl;
             checkpoint += timeFromUs(100.0);
         }
+        if (endtime == 0) {
+            // Iterate through sinks to see if they have completed the flows
+            bool all_done = true;
+            list <SwiftSrc*>::iterator src_i;
+            for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
+                if ((*src_i)->_completion_time == 0) {
+                    all_done = false;
+                    break;
+                }
+            }
+            if (all_done) {
+                cout << "All flows completed" << endl;
+                break;
+            }
+        }
     }
 
     cout << "Done" << endl;
@@ -528,7 +543,8 @@ int main(int argc, char **argv) {
     flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes" << endl;
     for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
         SwiftSink* sink = (*src_i)->_sink;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << (*src_i)->_completion_time - (*src_i)->_start_time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack <<  endl;
+        simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack <<  endl;
         cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
     }
     flowlog.close();

@@ -35,9 +35,10 @@ print("Connections", conns, file=f)
 
 srcs = []
 dsts = []
-for n in range(nodes):
-    srcs.append(n)
-    dsts.append(n)
+for c in range(int(conns/nodes)):
+    for n in range(nodes):
+        srcs.append(n)
+        dsts.append(n)
 if randseed != 0:
     seed(randseed)
 shuffle(srcs)
@@ -46,13 +47,14 @@ shuffle(dsts)
 #print(dsts)
 
 # eliminate any duplicates - a node should not send to itself
-for n in range(nodes):
-    if srcs[n] == dsts[n]:
-        i = (n+1)%nodes
-        #print("swapping", n, "and", i)
-        tmp = dsts[n]
-        dsts[n] = dsts[i]
-        dsts[i] = tmp
+for c in range(int(conns/nodes)):
+    for n in range(nodes):
+        if srcs[n + nodes*c] == dsts[n+ nodes*c]:
+            i = (n+1)%nodes
+            #print("swapping", n, "and", i)
+            tmp = dsts[n+ nodes*c]
+            dsts[n+ nodes*c] = dsts[i+ nodes*c]
+            dsts[i+ nodes*c] = tmp
 
 #print(dsts)
 

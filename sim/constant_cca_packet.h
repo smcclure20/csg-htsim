@@ -43,6 +43,7 @@ public:
     inline simtime_picosec ts() const {return _ts;}
     inline void set_ts(simtime_picosec ts) {_ts = ts;}
     virtual PktPriority priority() const {return Packet::PRIO_LO;}  // change this if you want to use swift with priority queues
+    inline bool is_header() const {return _is_header;}
 
 protected:
     seq_t _seqno;
@@ -68,6 +69,24 @@ public:
         p->set_dst(dst);
         p->_pathid = pathid;
         p->_direction = NONE;
+        p->_is_nack = false;
+        return p;
+    }
+
+    inline static ConstantCcaAck* newnack(PacketFlow &flow, const Route &route, 
+                                   seq_t seqno, seq_t ackno,
+                                   simtime_picosec ts_echo, uint32_t dst, uint32_t src, uint32_t pathid) {
+        ConstantCcaAck* p = _packetdb.allocPacket();
+        p->set_route(flow,route,ACKSIZE,ackno);
+        p->_type = CONSTCCAACK;
+        p->_seqno = seqno;
+        p->_ackno = ackno;
+        p->_ts_echo = ts_echo;
+        p->set_src(src);
+        p->set_dst(dst);
+        p->_pathid = pathid;
+        p->_direction = NONE;
+        p->_is_nack = true;
         return p;
     }
 
@@ -76,6 +95,7 @@ public:
     inline seq_t ackno() const {return _ackno;}
     inline seq_t ds_ackno() const {return _ds_ackno;}
     inline simtime_picosec ts_echo() const {return _ts_echo;}
+    inline bool is_nack() const {return _is_nack;}
     virtual PktPriority priority() const {return Packet::PRIO_HI;}
 
     virtual ~ConstantCcaAck(){}
@@ -85,6 +105,7 @@ protected:
     seq_t _ackno;
     seq_t _ds_ackno;
     simtime_picosec _ts_echo;
+    bool _is_nack;
     static PacketDB<ConstantCcaAck> _packetdb;
 };
 

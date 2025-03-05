@@ -166,6 +166,7 @@ CompositeQueue::receivePacket(Packet& pkt)
                 if (_logger) _logger->logQueue(*this, QueueLogger::PKT_TRIM, pkt);
                         
                 if (_queuesize_high+booted_pkt->size() > 2*_maxsize){
+                    // cout << "Drop header\n";
                     if (_return_to_sender && booted_pkt->reverse_route()  && booted_pkt->bounced() == false) {
                         //return the packet to the sender
                         if (_logger) _logger->logQueue(*this, QueueLogger::PKT_BOUNCE, *booted_pkt);
@@ -224,7 +225,7 @@ CompositeQueue::receivePacket(Packet& pkt)
     
     if (_queuesize_high+pkt.size() > 2*_maxsize){
         //drop header
-        //cout << "drop!\n";
+        // cout << "drop!\n";
         if (_return_to_sender && pkt.reverse_route()  && pkt.bounced() == false) {
             //return the packet to the sender
             if (_logger) _logger->logQueue(*this, QueueLogger::PKT_BOUNCE, pkt);

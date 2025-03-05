@@ -177,7 +177,6 @@ SwiftSubflowSrc::handle_ack(SwiftAck::seq_t ackno) {
         _RFC2988_RTO_timeout = now + _rto;// RFC 2988 5.3
     
         if (ackno >= _highest_sent) {
-            
             _highest_sent = ackno;
             //cout << timeAsUs(now) << " " << nodename() << " highest_sent now  " << _highest_sent << endl;
             _RFC2988_RTO_timeout = timeInf;// RFC 2988 5.2
@@ -262,6 +261,11 @@ SwiftSubflowSrc::handle_ack(SwiftAck::seq_t ackno) {
         /* See RFC 3782: if we haven't recovered from timeouts
            etc. don't do fast recovery */
         _src.log(this, SwiftLogger::SWIFT_RCV_3DUPNOFR);
+        return;
+    }
+
+    if (_last_acked == _highest_sent) { 
+        // We have gotten the dupacks because we haven't sent anything else (in pacing mode)
         return;
     }
   
@@ -357,6 +361,15 @@ SwiftSubflowSrc::send_packets() {
 }
 
 bool
+SwiftSubflowSrc::send_next_packet_paced() {
+    bool sent = send_next_packet();
+    if(sent && (_RFC2988_RTO_timeout == timeInf)) {// still need timers even in paced mode
+        _RFC2988_RTO_timeout = eventlist().now() + _rto;
+    }
+    return sent;
+}
+
+bool
 SwiftSubflowSrc::send_next_packet() {
     // ask the scheduler if we can send now
     if (_src.queuesize(_flow.flow_id()) > 2) {
@@ -367,29 +380,59 @@ SwiftSubflowSrc::send_next_packet() {
     _deferred_send = false;
     
     // keep track of DSN associated with SeqNo, so we can retransmit
-    SwiftPacket::seq_t dsn;
-    if (_src.more_data_available()) {
-        // dsn = _src.get_next_dsn();
-        dsn = _src._highest_dsn_sent+1;
-    } else if ((_highest_sent < _recoverq) || (_last_acked < _src._flow_size)) {
-        dsn = _dsn_map[_highest_sent+1];
-    } else {
-        // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
+    if (!_src.more_data_available()  && _highest_sent >= _src._flow_size) {
         return false;
     }
-
-    if (_dsn_map.size() == 0 || _highest_sent+1 > (uint64_t) prev(_dsn_map.end())->first) { // Do not overwrite dsn map when retransmitting after an RTO
+    
+    SwiftPacket::seq_t dsn;
+    // if (_highest_sent < _recoverq) {
+    //     dsn = _dsn_map[_highest_sent+1];
+    // } else if (_src.more_data_available()) {
+    //     // dsn = _src.get_next_dsn();
+    //     dsn = _src._highest_dsn_sent+1;
+    //     _src._highest_dsn_sent += mss();
+    // } 
+    // else if (_last_acked < _src._flow_size) {
+    //     dsn = _dsn_map[_highest_sent+1];
+    // } 
+    // else {
+    //     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
+    //     return false;
+    // }
+    // uint64_t highest_map = (uint64_t) prev(_dsn_map.end())->first;
+    if (!_dsn_map.empty() && _dsn_map.count(_highest_sent + 1) > 0) {
+        dsn = _dsn_map[_highest_sent+1];
+        if (dsn == 0) {
+            cout << "highest_sent " << _highest_sent << " last_acked " << _last_acked << " ,highest in map: " << (uint64_t) prev(_dsn_map.end())->first << endl;
+            assert(false);
+        }
+    } else {
+        dsn = _src._highest_dsn_sent+1;
         _dsn_map[_highest_sent+1] = dsn;
         _src._highest_dsn_sent += mss();
-    } else {
-        dsn = _dsn_map[_highest_sent+1];
+        if (dsn != _highest_sent +1) {
+            cout << "dsn is " << dsn << ", highest_sent " << _highest_sent << " last_acked " << _last_acked << endl;
+            assert(false);
+        }
     }
+    // if (_dsn_map.empty() || _highest_sent+1 > (uint64_t) prev(_dsn_map.end())->first) { // Do not overwrite dsn map when retransmitting after an RTO
+    //     dsn = _src._highest_dsn_sent+1;
+    //     _dsn_map[_highest_sent+1] = dsn;
+    //     _src._highest_dsn_sent += mss();
+    //     if (dsn != _highest_sent +1) {
+    //         cout << "dsn is " << dsn << ", highest_sent " << _highest_sent << " last_acked " << _last_acked << endl;
+    //         assert(false);
+    //     }
+    // } else {
+    //     dsn = _dsn_map[_highest_sent+1];
+    // }
     
 
     SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _highest_sent+1, dsn, mss(), _src._destination, _src._addr, _pathid);
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << " dsn " << dsn << endl;
     _highest_sent += mss();  
     _packets_sent += mss();
+
     
     p->flow().logTraffic(*p, _src, TrafficLogger::PKT_CREATESEND);
     p->set_ts(eventlist().now());
@@ -431,7 +474,7 @@ SwiftSubflowSrc::retransmit_packet() {
     }
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     SwiftPacket::seq_t dsn = _dsn_map[_last_acked+1];
-    //cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
+    // cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
     SwiftPacket* p = SwiftPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid);
 
     p->flow().logTraffic(*p, _src, TrafficLogger::PKT_CREATESEND);
@@ -554,6 +597,7 @@ void SwiftSubflowSrc::doNextEvent() {
 
         if (_established)
             _highest_sent = _last_acked + mss();
+            
 
         _dupacks = 0;
         _retransmit_cnt++;
@@ -933,7 +977,7 @@ SwiftPacer::just_sent() {
 void
 SwiftPacer::doNextEvent() {
     assert(eventlist().now() == _next_send);
-    _sub->send_next_packet();
+    _sub->send_next_packet_paced();
     _last_send = eventlist().now();
     //cout << "sending paced packet" << endl;
 

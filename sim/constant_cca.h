@@ -8,12 +8,14 @@
 
 #include <list>
 #include <set>
+#include <deque>
 #include "config.h"
 #include "network.h"
 #include "eventlist.h"
 #include "sent_packets.h"
 #include "constant_cca_packet.h"
 #include "constant_cca_scheduler.h"
+#include "ecn.h"
 
 //#define MODEL_RECEIVE_WINDOW 1
 
@@ -90,6 +92,7 @@ public:
     void permute_paths();
     bool _plb;
     inline bool plb() const {return _plb;}
+    void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
 
     // packet switching
     bool _spraying;
@@ -106,6 +109,7 @@ public:
     uint32_t drops() {return _drops;};
 
     uint32_t rtos() {return _rto_count;};
+    uint32_t total_dupacks() {return _total_dupacks;};
 
     // stats
     simtime_picosec _completion_time;
@@ -128,6 +132,8 @@ public:
 
     int send_packets();
 
+    void disable_fast_recovery() {_fr_disabled = true;}
+
 protected:
     // connection state
     bool _established;
@@ -140,6 +146,8 @@ protected:
     uint32_t _inflate; // how much we're currently extending cwnd based off dup ack arrivals.
     uint64_t _recoverq;
     bool _in_fast_recovery;
+
+    bool _fr_disabled; // fast recovery disabled
 
     uint32_t _min_cwnd;
     uint32_t _max_cwnd;
@@ -159,11 +167,14 @@ protected:
     // PLB stuff
     int _decrease_count;
     simtime_picosec _last_good_path;
+    std::deque<bool> _ecn_marks;
+    int _plb_threshold_ecn;
 
     uint32_t _drops;
     simtime_picosec _RFC2988_RTO_timeout;
     bool _rtx_timeout_pending;
     uint32_t _rto_count;
+    uint32_t _total_dupacks;
 
     // Flow stuff
     uint32_t _pathid;
@@ -176,6 +187,7 @@ protected:
 
 private:
     void retransmit_packet();
+    void retransmit_packet(uint64_t seqno);
     bool _deferred_send;  // set if we tried to send and the scheduler said no.
     simtime_picosec _plb_interval;
     string _nodename;
@@ -209,6 +221,7 @@ public:
 
     // stats
     uint32_t _spurious_retransmits;
+    uint32_t _nacks_sent;
 
     set<ConstantCcaAck::seq_t> _received; 
     virtual const string& nodename() { return _nodename; }
@@ -226,6 +239,7 @@ private:
 
     // Mechanism
     void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid);
+    void send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno);
 };
 
 class ConstantCcaRtxTimerScanner : public EventSource {
