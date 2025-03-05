@@ -74,6 +74,9 @@ int main(int argc, char **argv) {
     NetRouteStrategy route_strategy = SOURCE_ROUTE;
     HostLBStrategy host_lb = NOLB;
     int link_failures = 0;
+    double failure_pct = 0.1; // failed links have 10% bandwidth
+    int plb_ecn = 0;
+    queue_type queue_type = ECN;
 
     int i = 1;
     filename << "None";
@@ -123,6 +126,14 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-fails")){
             link_failures = atoi(argv[i+1]);
             i++;
+        } else if (!strcmp(argv[i],"-failpct")){
+            failure_pct = stod(argv[i+1]);
+            i++;
+        }  else if (!strcmp(argv[i],"-plbecn")){
+            plb_ecn = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-trim")){
+            queue_type = COMPOSITE_ECN;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
@@ -201,7 +212,7 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, RANDOM, CONST_SCHEDULER, link_failures);
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct);
 #endif
 
 #ifdef OV_FAT_TREE
@@ -296,10 +307,14 @@ int main(int argc, char **argv) {
             net_paths[dest][src] = paths;
         }
 
-        double rate = (linkspeed / (no_of_nodes-1)) / (packet_size * 8);
-        simtime_picosec interpacket_delay = timeFromSec(1. / rate)+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
+        double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
+        simtime_picosec interpacket_delay = timeFromSec(1. / rate); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
         sender = new ConstantCcaSrc(rtxScanner, eventlist, src, interpacket_delay, NULL);  
         sender->set_cwnd(cwnd*Packet::data_packet_size());
+
+        // if (queue_type == COMPOSITE_ECN) {
+        //     sender->disable_fast_recovery(); // no fast recovery when we have packet trimming
+        // }
                         
         if (crt->size>0){
             sender->set_flowsize(crt->size);
@@ -307,6 +322,7 @@ int main(int argc, char **argv) {
                 
         if (host_lb == PLB) {
             sender->enable_plb();
+            sender->set_plb_threshold_ecn(plb_ecn);
         } else if (host_lb == SPRAY) {
             sender->set_spraying();
         }
@@ -390,7 +406,7 @@ int main(int argc, char **argv) {
             //routein->push_back(swiftSrc);
         }
 
-        sender->connect(*sink, (uint32_t)crt->start, dest, *routeout, *routein);
+        sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), dest, *routeout, *routein);
         // sender->set_paths(net_paths[src][dest]);
 
         if (route_strategy != SOURCE_ROUTE) {
@@ -409,6 +425,21 @@ int main(int argc, char **argv) {
         if (eventlist.now() > checkpoint) {
             cout << "Simulation time " << timeAsUs(eventlist.now()) << endl;
             checkpoint += timeFromUs(100.0);
+            if (endtime == 0) {
+                // Iterate through sinks to see if they have completed the flows
+                bool all_done = true;
+                list <ConstantCcaSink*>::iterator sink_i;
+                for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
+                    if ((*sink_i)->_cumulative_ack < (*sink_i)->_src->_flow_size) {
+                        all_done = false;
+                        break;
+                    }
+                }
+                if (all_done) {
+                    cout << "All flows completed" << endl;
+                    break;
+                }
+            }
         }
     }
 
@@ -460,10 +491,11 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes" << endl;
+    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs" << endl;
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantCcaSink* sink = (*src_i)->_sink;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << (*src_i)->_completion_time - (*src_i)->_start_time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack <<  endl;
+        simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack << "," << sink->_nacks_sent << "," << (*src_i)->total_dupacks() <<  endl;
     }
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
@@ -471,7 +503,12 @@ int main(int argc, char **argv) {
         cout << (*sink_i)->nodename() << " received " << (*sink_i)->_cumulative_ack << " bytes, " << (*sink_i)->drops() << " drops" << endl;
         if ((*sink_i)->_cumulative_ack < 2004000) {
             cout << "Incomplete flow " << endl;
-            ConstantCcaSrc* counterpart_src = (*sink_i)->_src;
+            ConstantCcaSink* sink = (*sink_i);
+            ConstantCcaSrc* counterpart_src = sink->_src;
+            if (counterpart_src->_completion_time == 0) {
+                ConstantCcaSrc test = *counterpart_src;
+                cout << "Src, sent: " << test._highest_sent << "; last acked " << test.last_acked() << endl;
+            }
             cout << "Src, sent: " << counterpart_src->_highest_sent << "; last acked " << counterpart_src->last_acked() << endl;
         }
     }

@@ -11,32 +11,40 @@
 ConstantCcaPacer::ConstantCcaPacer(ConstantCcaSrc& src, EventList& event_list, simtime_picosec interpacket_delay)
     : EventSource(event_list,"constant_cca_pacer"), _src(&src), _interpacket_delay(interpacket_delay) {
     _last_send = eventlist().now();
+    _next_send = 0;
 }
 
 void
 ConstantCcaPacer::schedule_send(simtime_picosec delay) {
+    // cout << _src->nodename() << " schedule_send " << timeAsUs(eventlist().now()) << endl;
+    // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
     simtime_picosec previous_next_send = _next_send;
-    _next_send = _last_send + _interpacket_delay;
-    if (_next_send <= eventlist().now()) {
+    simtime_picosec new_next_send = _last_send + _interpacket_delay;
+    if (new_next_send <= eventlist().now()) {
         // Tricky!  We're going in to pacing mode, but it's more than
         // the pacing delay since we last sent.  Presumably the best
         // thing is to immediately send, and then pacing will kick in
         // next time round.
         _next_send = eventlist().now();
         doNextEvent();
+        // cout << "Setting next send to now" << endl;
         return;
     }
-    if (_next_send  == previous_next_send) {
+    if (previous_next_send > eventlist().now()) {
+        // cout << "Avoiding overwriting next send" << endl;
         return;
+         // don't overwrite next_send if it's already in the future
     }
+    // cout << "Setting next send to " << timeAsUs(new_next_send) << endl;
+    _next_send = new_next_send;
     eventlist().sourceIsPending(*this, _next_send);
 }
 
 bool 
 ConstantCcaPacer::allow_send() {
     simtime_picosec now = eventlist().now();
-    if (_last_send == 0 && now == 0 && _src->_highest_sent == 0) {
+    if (_last_send == 0 && _src->_highest_sent == 0) {
         // first packet, so we can send
         return true;
     }
@@ -59,6 +67,7 @@ ConstantCcaPacer::just_sent() {
 
 void
 ConstantCcaPacer::doNextEvent() {
+    // cout << _src->nodename() << " doNextEvent " << timeAsUs(eventlist().now()) << "(next send is " << timeAsUs(_next_send) << ")" << endl;
     assert(eventlist().now() == _next_send);
     // _src->send_next_packet();
     _src->send_packets();
@@ -67,6 +76,7 @@ ConstantCcaPacer::doNextEvent() {
 
     if (_src->pacing_delay() > 0) {
         // schedule the next packet send
+        // cout << _src->nodename() << " calling schedule send 1" << endl;
         schedule_send(_src->pacing_delay());
         //cout << "rescheduling send " << timeAsUs(_src->_pacing_delay) << "us" << endl;
     } else {
@@ -101,6 +111,9 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _inflate = 0;
     _drops = 0;
     _rto_count = 0;
+    _total_dupacks;
+
+    _fr_disabled = false;
 
     // cc init
     _const_cwnd = 10 * mss();  // initial window, in bytes  Note: values in paper are in packets; we're maintaining in bytes.
@@ -184,23 +197,6 @@ ConstantCcaSrc::adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t ackno) 
     if (_const_cwnd < _min_cwnd) {
         _const_cwnd = _min_cwnd;
     }
-
-    
-    if (plb()) {
-        simtime_picosec td = _min_rtt * 1.5; // TODO: Find a good threshold for "congestion"
-        if (delay <= td) {
-            // good delay!
-            _last_good_path = now;
-            _plb_interval = random()%(2*_rtt) + 5*_rtt;
-        }
-
-        // PLB (simple version)
-        if (now - _last_good_path > _plb_interval) {
-            cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
-            _last_good_path = now;
-            move_path_flow_label();
-        }
-    }
 }
 
 void
@@ -259,7 +255,12 @@ ConstantCcaSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
         send_packets();
         return;
     }
+    if (_fr_disabled) {
+        // fast recovery disabled
+        return;
+    }
     // It's a dup ack
+    _total_dupacks++;
     if (_in_fast_recovery) { // still in fast recovery; hopefully the prodigal ACK is on it's way
         _inflate += mss();
         if (_inflate > _const_cwnd) {
@@ -313,6 +314,7 @@ ConstantCcaSrc::send_packets() {
         _highest_sent = 0;
 
         p->sendOn();
+        _pacer.just_sent();
 
         if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1
             _RFC2988_RTO_timeout = eventlist().now() + _rto;
@@ -335,6 +337,7 @@ ConstantCcaSrc::send_packets() {
         // like this isn't what Google does with hardware pacing.
         
         if (!_pacer.is_pending()) {
+            // cout << nodename() << " calling schedule send 2" << endl;
             _pacer.schedule_send(_pacing_delay);
             //cout << eventlist().now() << " " << nodename() << " pacer set for " << timeAsUs(_pacing_delay) << "us" << endl;
 
@@ -358,7 +361,8 @@ ConstantCcaSrc::send_packets() {
 
     while ((_last_acked + c >= _highest_sent + mss()) && (more_data_available() || (_highest_sent < _recoverq) || (_last_acked < _flow_size))) { // this is wrong for multipath
         if (!_pacer.allow_send()) {
-            _pacer.schedule_send(_pacing_delay);
+            // cout << nodename() << " calling schedule send 3" << endl;
+            // _pacer.schedule_send(_pacing_delay);
             return sent_count;
         }
 
@@ -448,9 +452,23 @@ ConstantCcaSrc::retransmit_packet() {
 
     _packets_sent += mss();
 
-    if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1
+    if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1 // the fact that with NACKs this broke concerns me - are we getting worse performance? I thought this was necessary since otherwise you won't timeout if you were first in fast retransmit, right? Let's test
         _RFC2988_RTO_timeout = eventlist().now() + _rto;
     }
+}
+
+void 
+ConstantCcaSrc::retransmit_packet(uint64_t seqno) {
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, mss(), _destination, _addr, _pathid);
+
+    p->set_ts(eventlist().now());
+    p->sendOn();
+
+    _packets_sent += mss();
+
+    // if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1
+    //     _RFC2988_RTO_timeout = eventlist().now() + _rto;
+    // }
 }
 
 void
@@ -459,6 +477,13 @@ ConstantCcaSrc::receivePacket(Packet& pkt)
     simtime_picosec ts_echo;
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     ConstantCcaAck::seq_t ackno = p->ackno();
+
+    if (p->is_nack()) {
+        cout << nodename() << " received NACK " << ackno << endl;
+        retransmit_packet(ackno);
+        p->free();
+        return;
+    }
   
     ts_echo = p->ts_echo();
     p->free();
@@ -482,6 +507,37 @@ ConstantCcaSrc::receivePacket(Packet& pkt)
     assert(ackno >= _last_acked);  // no dups or reordering allowed in this simple simulator TODO: This should break 
     simtime_picosec delay = eventlist().now() - ts_echo;
     adjust_cwnd(delay, ackno);
+
+
+    if (plb()) {
+        simtime_picosec now = eventlist().now();
+        _ecn_marks.emplace_back(pkt.flags() & ECN_CE);
+        if (_ecn_marks.size() > 10) {
+            _ecn_marks.pop_front();
+        }
+        int total_marks = 0;
+        for (auto& m : _ecn_marks) {
+            total_marks += m;
+        }
+        if (total_marks < _plb_threshold_ecn) {
+            // not enough marks to be a problem
+            _last_good_path = now;
+            _plb_interval = random()%(2*_rtt) + 5*_rtt;
+        }
+        // simtime_picosec td = _min_rtt * 1.2; // TODO: Find a good threshold for "congestion"
+        // if (delay <= td) {
+        //     // good delay!
+        //     _last_good_path = now;
+        //     _plb_interval = random()%(2*_rtt) + 5*_rtt;
+        // }
+
+        // PLB (simple version)
+        if (now - _last_good_path > _plb_interval) {
+            cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
+            _last_good_path = now;
+            move_path_flow_label();
+        }
+    }
 
     handle_ack(ackno);
 }
@@ -681,6 +737,7 @@ void
 ConstantCcaSrc::startflow() {
     _established = true; // send data from the start
     send_packets();
+    _pacer.schedule_send(_pacing_delay);
 }
 
 bool ConstantCcaSrc::more_data_available() const {
@@ -701,6 +758,7 @@ ConstantCcaSink::ConstantCcaSink()
     _cumulative_ack = 0;
     _packets = 0;
     _spurious_retransmits = 0;
+    _nacks_sent = 0;
     _src = NULL;
     _nodename = "constantccasink";
 }
@@ -718,6 +776,18 @@ ConstantCcaSink::connect(ConstantCcaSrc& src, const Route& route) {
 void
 ConstantCcaSink::receivePacket(Packet& pkt) {
     ConstantCcaPacket *p = (ConstantCcaPacket*)(&pkt);
+    if (p->is_header()) {
+        // Do not update anything, just reply to the sender
+        uint32_t src = p->src();
+        uint32_t dst = p->dst();
+        uint32_t pathid = p->pathid();
+        uint64_t seqno = p->seqno();
+        simtime_picosec ts = p->ts();
+        p->free();
+        // cout << "Sending NACK for packet " << seqno << " to " << _src->nodename() << endl;
+        send_nack(ts, src, dst, pathid, seqno);
+        return;
+    }
     int size = p->size(); // TODO: the following code assumes all packets are the same size
     simtime_picosec ts = p->ts();
     _packets+= p->size();
@@ -755,6 +825,15 @@ ConstantCcaSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src
     ConstantCcaAck *ack = ConstantCcaAck::newpkt(_src->flow(), *rt, 0, _cumulative_ack, ts, ack_dst, ack_src, pathid);
 
     ack->sendOn();
+}
+
+void 
+ConstantCcaSink::send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno) {
+    const Route* rt = _route;
+    ConstantCcaAck *nack = ConstantCcaAck::newnack(_src->flow(), *rt, 0, seqno, ts, ack_dst, ack_src, pathid);
+
+    nack->sendOn();
+    _nacks_sent++;
 }
  
 uint64_t

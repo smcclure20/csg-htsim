@@ -311,7 +311,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 
 FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
                                  QueueLoggerFactory* logger_factory,
-                                 EventList* ev,FirstFit * fit, queue_type q, uint32_t num_failed){
+                                 EventList* ev,FirstFit * fit, queue_type q, uint32_t num_failed, double fail_pct){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
     if (_link_latencies[TOR_TIER] == 0) {
@@ -328,6 +328,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     ff = fit;
 
     failed_links = num_failed;
+    fail_bw_pct = fail_pct;
   
     cout << "Fat tree topology (2) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -338,7 +339,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
                                  QueueLoggerFactory* logger_factory,
                                  EventList* ev,FirstFit * fit, queue_type qtype,
-                                 queue_type sender_qtype, uint32_t num_failed){
+                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
     if (_link_latencies[TOR_TIER] == 0) {
@@ -355,6 +356,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     ff = fit;
 
     failed_links = num_failed;
+    fail_bw_pct = fail_pct;
 
     cout << "Fat tree topology (3) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -920,7 +922,7 @@ void FatTreeTopology::init_network(){
                     }
         
                     if ((l+agg*_agg_switches_per_pod)<failed_links){
-                        queues_nc_nup[core][agg][b] = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER]/10, _queue_down[CORE_TIER],
+                        queues_nc_nup[core][agg][b] = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER]*fail_bw_pct, _queue_down[CORE_TIER],
                                                                DOWNLINK, CORE_TIER, false);
                         cout << "Adding link failure for agg_sw " << ntoa(agg) << " l " << ntoa(l) << " b " << ntoa(b) << endl;
                     } else {

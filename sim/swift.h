@@ -62,6 +62,7 @@ public:
     PacketFlow& flow() {return _flow;}
     uint32_t drops() const { return _drops;}
     bool send_next_packet();
+    bool send_next_packet_paced();
     virtual void send_callback();  // called by scheduler when it has more space
     uint64_t last_acked() const {return _last_acked;}
 protected:
