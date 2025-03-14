@@ -138,6 +138,11 @@ CompositeQueue::receivePacket(Packet& pkt)
     pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_ARRIVE);
     if (_logger) _logger->logQueue(*this, QueueLogger::PKT_ARRIVE, pkt);
 
+    if (drand() < _stochastic_loss_rate) {
+        pkt.free();
+        return;
+    }
+
     if (!pkt.header_only()){
         if (_queuesize_low+pkt.size() <= _maxsize  || drand()<0.5) {
             //regular packet; don't drop the arriving packet

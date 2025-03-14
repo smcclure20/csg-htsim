@@ -99,6 +99,12 @@ void
 CompositePrioQueue::receivePacket(Packet& pkt)
 {
     pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_ARRIVE);
+
+    if (drand() < _stochastic_loss_rate) {
+        pkt.free();
+        return;
+    }
+    
     if (!pkt.header_only()){
         if (_queuesize_low+pkt.size() <= _maxsize
             || ((pkt.path_len() == _enqueued_low.front()->path_len()) && drand()<0.5)

@@ -24,6 +24,11 @@ RandomQueue::receivePacket(Packet& pkt)
     double drop_prob = 0;
     int crt = _queuesize + pkt.size();
 
+    if (drand() < _stochastic_loss_rate) {
+        pkt.free();
+        return;
+    }
+
     if (_plr > 0.0 && drand() < _plr){
         //if (_logger) _logger->logQueue(*this, QueueLogger::PKT_DROP, pkt);
         //pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_DROP);
