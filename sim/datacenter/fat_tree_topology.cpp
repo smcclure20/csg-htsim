@@ -296,6 +296,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     _qt = q;
     _sender_qt = FAIR_PRIO;
     failed_links = 0;
+    _rts = false;
     if (_link_latencies[TOR_TIER] == 0) {
         _hop_latency = timeFromUs((uint32_t)1);
     } else {
@@ -329,6 +330,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 
     failed_links = num_failed;
     fail_bw_pct = fail_pct;
+    _rts = false;
   
     cout << "Fat tree topology (2) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -339,7 +341,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
                                  QueueLoggerFactory* logger_factory,
                                  EventList* ev,FirstFit * fit, queue_type qtype,
-                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct){
+                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
     if (_link_latencies[TOR_TIER] == 0) {
@@ -357,6 +359,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 
     failed_links = num_failed;
     fail_bw_pct = fail_pct;
+    _rts = rts;
 
     cout << "Fat tree topology (3) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -661,7 +664,11 @@ FatTreeTopology::alloc_queue(QueueLogger* queueLogger, linkspeed_bps speed, mem_
     case RANDOM:
         return new RandomQueue(speed, queuesize, *_eventlist, queueLogger, memFromPkt(RANDOM_BUFFER));
     case COMPOSITE:
-        return new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
+    {
+        CompositeQueue* q = new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
+        q->setRTS(_rts);
+        return q;
+    }
     case CTRL_PRIO:
         return new CtrlPrioQueue(speed, queuesize, *_eventlist, queueLogger);
     case AEOLUS:

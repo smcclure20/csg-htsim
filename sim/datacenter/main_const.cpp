@@ -77,6 +77,8 @@ int main(int argc, char **argv) {
     double failure_pct = 0.1; // failed links have 10% bandwidth
     int plb_ecn = 0;
     queue_type queue_type = ECN;
+    double rate_coef = 1.0;
+    bool rts = false;
 
     int i = 1;
     filename << "None";
@@ -134,9 +136,14 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-trim")){
             queue_type = COMPOSITE_ECN;
+        } else if (!strcmp(argv[i],"-rts")){
+            rts = true;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
+        } else if (!strcmp(argv[i],"-ratecoef")){
+            rate_coef = stod(argv[i+1]);
+            i++;
         } else if (!strcmp(argv[i],"-hostlb")){
             if (!strcmp(argv[i+1], "spray")) {
                 host_lb = SPRAY;
@@ -212,7 +219,7 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct);
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts);
 #endif
 
 #ifdef OV_FAT_TREE
@@ -288,6 +295,7 @@ int main(int argc, char **argv) {
 
     uint32_t connID = 0;
     all_conns = conns->getAllConnections();
+    uint32_t connCount = all_conns->size();
 
     for (uint32_t c = 0; c < all_conns->size(); c++){
         connection* crt = all_conns->at(c);
@@ -308,7 +316,7 @@ int main(int argc, char **argv) {
         }
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
-        simtime_picosec interpacket_delay = timeFromSec(1. / rate); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
+        simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
         sender = new ConstantCcaSrc(rtxScanner, eventlist, src, interpacket_delay, NULL);  
         sender->set_cwnd(cwnd*Packet::data_packet_size());
 
@@ -406,6 +414,9 @@ int main(int argc, char **argv) {
             //routein->push_back(swiftSrc);
         }
 
+        // simtime_picosec offset = (interpacket_delay/connCount) * (connID-1);
+        // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
+        // simtime_picosec starttime = crt->start + offset;
         sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), dest, *routeout, *routein);
         // sender->set_paths(net_paths[src][dest]);
 
@@ -491,11 +502,11 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs" << endl;
+    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent" << endl;
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantCcaSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack << "," << sink->_nacks_sent << "," << (*src_i)->total_dupacks() <<  endl;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack << "," << sink->_nacks_sent << "," << (*src_i)->total_dupacks() << "," << (*src_i)->_packets_sent <<  endl;
     }
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
