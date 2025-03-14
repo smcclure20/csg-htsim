@@ -20,7 +20,7 @@ ConstantCcaPacer::schedule_send(simtime_picosec delay) {
     // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
     simtime_picosec previous_next_send = _next_send;
-    simtime_picosec new_next_send = _last_send + _interpacket_delay;
+    simtime_picosec new_next_send = _last_send + _interpacket_delay + rand() % (_interpacket_delay/10);
     if (new_next_send <= eventlist().now()) {
         // Tricky!  We're going in to pacing mode, but it's more than
         // the pacing delay since we last sent.  Presumably the best
@@ -111,7 +111,7 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _inflate = 0;
     _drops = 0;
     _rto_count = 0;
-    _total_dupacks;
+    _total_dupacks = 0;
 
     _fr_disabled = false;
 
@@ -152,7 +152,12 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
 
     _nodename = "constcca_src_" + std::to_string(get_id());
 
-    _min_rtt = timeInf;
+    _min_rtt = timeFromMs(1000);
+
+    // _pending_retransmit = 0;
+    _nack_rtxs = 0;
+
+    deferred_retransmit = false;
 }
 
 void
@@ -299,9 +304,28 @@ ConstantCcaSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
 
 int 
 ConstantCcaSrc::send_packets() {
-    if (_last_acked >= _flow_size && _completion_time == 0){
+    if (_last_acked >= _flow_size && _completion_time == 0){ // should this be in receive packet instead?
         _completion_time = eventlist().now();
         cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
+    }
+
+    // if (deferred_retransmit) { // should also check pacer? How else could this be called?
+    //     retransmit_packet();
+    //     deferred_retransmit = false;
+    //     return 1;
+    // }
+
+    if (_pending_retransmit.size() > 0) { // should also check pacer? How else could this be called?
+        // Only do a pending retransmit if it's not already been acked
+        while (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() <= _last_acked && *_pending_retransmit.begin()-1 <= _highest_sent) {
+            _pending_retransmit.erase(_pending_retransmit.begin());
+        }
+        if (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() > _last_acked && *_pending_retransmit.begin()-1 <= _highest_sent) {
+            uint64_t seqno = *_pending_retransmit.begin();
+            retransmit_packet(seqno);
+            return 1;
+        }
+        
     }
     // maybe should just rewrite this. What should the logic be?
     // Only send if the pacer allows it and the window has room
@@ -404,7 +428,7 @@ ConstantCcaSrc::send_next_packet() {
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, mss(), _destination, _addr, _pathid);
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << endl;
     _highest_sent += mss();  
-    _packets_sent += mss();
+    _packets_sent++;
     
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -443,14 +467,19 @@ ConstantCcaSrc::retransmit_packet() {
     if (_last_acked >= _flow_size) {
         return;
     }
+    // if (!_pacer.allow_send()) {
+    //     deferred_retransmit = true;
+    //     return;
+    // }
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     // cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, mss(), _destination, _addr, _pathid);
 
     p->set_ts(eventlist().now());
     p->sendOn();
+    _pacer.just_sent();
 
-    _packets_sent += mss();
+    _packets_sent++;
 
     if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1 // the fact that with NACKs this broke concerns me - are we getting worse performance? I thought this was necessary since otherwise you won't timeout if you were first in fast retransmit, right? Let's test
         _RFC2988_RTO_timeout = eventlist().now() + _rto;
@@ -459,31 +488,57 @@ ConstantCcaSrc::retransmit_packet() {
 
 void 
 ConstantCcaSrc::retransmit_packet(uint64_t seqno) {
+    if (!_pacer.allow_send()) {
+        _pending_retransmit.insert(seqno);
+        return;
+    }
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, mss(), _destination, _addr, _pathid);
 
     p->set_ts(eventlist().now());
     p->sendOn();
 
-    _packets_sent += mss();
+    _packets_sent++;
+    _pending_retransmit.erase(seqno);
+    _nack_rtxs++;
+    _pacer.just_sent();
+    // _pending_retransmit = 0; // maybe this should be a list?
 
-    // if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1
-    //     _RFC2988_RTO_timeout = eventlist().now() + _rto;
-    // }
+    if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1
+        _RFC2988_RTO_timeout = eventlist().now() + _rto;
+    }
 }
 
 void
 ConstantCcaSrc::receivePacket(Packet& pkt) 
 {
+    if (pkt.header_only()) {
+        ConstantCcaPacket* dp = (ConstantCcaPacket*)(&pkt);
+        ConstantCcaPacket::seq_t seqno = dp->seqno();
+        if (seqno > _last_acked && seqno-1 <= _highest_sent) {
+            // this is a packet that we haven't gotten an ACK for yet
+            retransmit_packet(seqno);
+        }
+        
+        dp->free();
+        return;
+    }
     simtime_picosec ts_echo;
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     ConstantCcaAck::seq_t ackno = p->ackno();
+    // _acks_received.push_back(ackno);
 
     if (p->is_nack()) {
-        cout << nodename() << " received NACK " << ackno << endl;
-        retransmit_packet(ackno);
+        // cout << nodename() << " received NACK " << ackno << endl;
+        // potential additional check: if we have already retransmitted this packet, don't retransmit again?
+        if (ackno > _last_acked && ackno-1 <= _highest_sent) {
+            // this is a NACK for a packet that we haven't gotten an ACK for yet
+            retransmit_packet(ackno);
+        }
+        
         p->free();
         return;
     }
+  
   
     ts_echo = p->ts_echo();
     p->free();
@@ -600,6 +655,7 @@ void ConstantCcaSrc::doNextEvent() {
         return;
     }
     if(_rtx_timeout_pending) {
+        // _rto_times.push_back(eventlist().now());
         _rtx_timeout_pending = false;
 
         _in_fast_recovery = false;

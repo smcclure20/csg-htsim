@@ -129,6 +129,7 @@ public:
     int queuesize(int flow_id);
 
     uint64_t _highest_sent;  //seqno is in bytes
+    uint64_t _packets_sent;
 
     int send_packets();
 
@@ -154,7 +155,6 @@ protected:
 
     uint32_t _const_cwnd;  // congestion window controlled by CCA
     uint32_t _prev_cwnd;
-    uint64_t _packets_sent;
     uint64_t _last_acked; // ack number of the last packet we received a cumulative ack for
     uint16_t _dupacks;
     uint32_t _retransmit_cnt;
@@ -185,6 +185,10 @@ protected:
     const Route* _route;
     ConstantCcaPacer _pacer;
 
+    // Account for NACK-based retransmissions when pacing 
+    std::set<uint64_t> _pending_retransmit;
+    bool deferred_retransmit;
+
 private:
     void retransmit_packet();
     void retransmit_packet(uint64_t seqno);
@@ -198,6 +202,10 @@ private:
 
     // Mechanism
     void clear_timer(uint64_t start,uint64_t end);
+
+    std::vector<uint32_t> _acks_received;
+    uint32_t _nack_rtxs;
+    std::vector<simtime_picosec> _rto_times;
 };
 
 
