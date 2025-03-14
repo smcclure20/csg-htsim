@@ -66,6 +66,13 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
 
     static simtime_picosec _update_period;
 
+    void setStochasticLossRate(double rate) {
+        _stochastic_loss_rate = rate;
+    }
+    double getStochasticLossRate() {
+        return _stochastic_loss_rate;
+    }
+
 protected:
     // Housekeeping
     PacketSink* _next_sink; // used in generic topology for linkage
@@ -86,6 +93,8 @@ protected:
     uint8_t _last_qs, _last_utilization;
 
     Switch* _switch;//which switch is this queue part of?
+
+    double _stochastic_loss_rate;
 };
 
 
