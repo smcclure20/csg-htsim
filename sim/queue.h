@@ -6,6 +6,7 @@
  * A simple FIFO queue
  */
 
+#include <random>
 //#include <list>
 //#include "circular_buffer.h"
 #include "config.h"
@@ -73,6 +74,30 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
         return _stochastic_loss_rate;
     }
 
+    void setBurstArrivalRate(simtime_picosec mean_interarrival_time) {
+        _burst_arrival_rate_mean = mean_interarrival_time;
+        _burst_arrival_rate = std::poisson_distribution<>(1.0 / mean_interarrival_time);
+    }
+    double getBurstArrivalRateMean() {
+        return _burst_arrival_rate_mean;
+    }
+
+    void setBurstDurationRate(simtime_picosec mean_duration) {
+        _burst_duration_mean = mean_duration;
+        _burst_duration = std::exponential_distribution<>(1.0 / _burst_duration_mean);
+    }
+    double getBurstDurationMean() {
+        return _burst_duration_mean;
+    }
+
+    void setBurstyLoss(bool is_enabled) {
+        _bursty_loss = is_enabled;
+    }
+    double getBurstyLoss() {
+        return _bursty_loss;
+    }
+
+
 protected:
     // Housekeeping
     PacketSink* _next_sink; // used in generic topology for linkage
@@ -94,7 +119,16 @@ protected:
 
     Switch* _switch;//which switch is this queue part of?
 
-    double _stochastic_loss_rate;
+    double _stochastic_loss_rate = 0;
+
+    bool _bursty_loss = false;
+    simtime_picosec _burst_arrival_rate_mean = 0;
+    std::poisson_distribution<> _burst_arrival_rate;
+    simtime_picosec _next_burst_arrival = 0;
+    bool _in_burst = false;
+    simtime_picosec _burst_duration_mean = 0;
+    std::exponential_distribution<> _burst_duration;
+    simtime_picosec _burst_end = 0;
 };
 
 
