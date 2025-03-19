@@ -2,6 +2,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <climits>
 #include <stdint.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -9,6 +10,20 @@
 #include <stdlib.h>
 #include <string>
 #include <sstream>
+#include <random>
+
+static std::mt19937 random_engine;
+
+void srand(unsigned seed);
+
+int rand();
+
+void srandom(unsigned seed);
+
+long random();
+
+std::mt19937 get_random_engine();
+
 double drand();
 
 

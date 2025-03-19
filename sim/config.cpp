@@ -6,6 +6,31 @@
 #include "route.h"
 #include "queue.h"
 
+void srand(unsigned seed)
+{
+    random_engine = mt19937(seed);
+}
+
+int rand()
+{
+    return random_engine() & INT_MAX;
+}
+
+void srandom(unsigned seed)
+{
+    srand(seed);
+}
+
+long random()
+{
+    return rand();
+}
+
+std::mt19937 get_random_engine()
+{
+    return random_engine;
+}
+
 double drand() {
     int r=rand();
     int m=RAND_MAX;
