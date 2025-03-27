@@ -79,6 +79,9 @@ int main(int argc, char **argv) {
     queue_type queue_type = ECN;
     double rate_coef = 1.0;
     bool rts = false;
+    int flaky_links = 0;
+    simtime_picosec latency = 0;
+    bool disable_fr = false;
 
     int i = 1;
     filename << "None";
@@ -138,7 +141,15 @@ int main(int argc, char **argv) {
             queue_type = COMPOSITE_ECN;
         } else if (!strcmp(argv[i],"-rts")){
             rts = true;
-        } else if (!strcmp(argv[i],"-tsample")){
+        } else if (!strcmp(argv[i],"-flakylinks")){
+            flaky_links = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-lat")){
+            latency = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-nofr")){
+            disable_fr = true;
+        }else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
         } else if (!strcmp(argv[i],"-ratecoef")){
@@ -219,7 +230,10 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts);
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency);
+    if (flaky_links > 0) {
+        top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
+    }
 #endif
 
 #ifdef OV_FAT_TREE
@@ -320,9 +334,9 @@ int main(int argc, char **argv) {
         sender = new ConstantCcaSrc(rtxScanner, eventlist, src, interpacket_delay, NULL);  
         sender->set_cwnd(cwnd*Packet::data_packet_size());
 
-        // if (queue_type == COMPOSITE_ECN) {
-        //     sender->disable_fast_recovery(); // no fast recovery when we have packet trimming
-        // }
+        if (disable_fr) {
+            sender->disable_fast_recovery(); // no fast recovery when we have packet trimming
+        }
                         
         if (crt->size>0){
             sender->set_flowsize(crt->size);
@@ -437,11 +451,11 @@ int main(int argc, char **argv) {
             cout << "Simulation time " << timeAsUs(eventlist.now()) << endl;
             checkpoint += timeFromUs(100.0);
             if (endtime == 0) {
-                // Iterate through sinks to see if they have completed the flows
+                // Iterate through sources to see if they have completed the flows
                 bool all_done = true;
-                list <ConstantCcaSink*>::iterator sink_i;
-                for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-                    if ((*sink_i)->_cumulative_ack < (*sink_i)->_src->_flow_size) {
+                list <ConstantCcaSrc*>::iterator src_i;
+                for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
+                    if ((*src_i)->last_acked() < (*src_i)->_flow_size) {
                         all_done = false;
                         break;
                     }
