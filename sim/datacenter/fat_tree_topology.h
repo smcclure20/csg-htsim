@@ -56,6 +56,7 @@ public:
     uint32_t failed_links;
     queue_type _qt;
     queue_type _sender_qt;
+    uint32_t flaky_links;
 
     // For regular topologies, just use the constructor.  For custom topologies, load from a config file.
     static FatTreeTopology* load(const char * filename, QueueLoggerFactory* logger_factory, EventList& eventlist,
@@ -68,9 +69,14 @@ public:
     FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
                     EventList* ev,FirstFit* f, queue_type qt, uint32_t fail, double fail_pct = 0);
     FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
-                    EventList* ev,FirstFit* f, queue_type qt, queue_type sender_qt, uint32_t fail, double fail_pct = 0, bool rts = false);
+                    EventList* ev,FirstFit* f, queue_type qt, queue_type sender_qt, uint32_t fail, double fail_pct = 0, bool rts = false, simtime_picosec hoplatency = 0);
 
     static void set_tier_parameters(int tier, int radix_up, int radix_down, mem_b queue_up, mem_b queue_down, int bundlesize, linkspeed_bps downlink_speed, int oversub);
+    void set_flaky_links(uint32_t num_links, simtime_picosec interarrival, simtime_picosec duration) {
+        flaky_links = num_links;
+        _link_loss_burst_interarrival_time = interarrival;
+        _link_loss_burst_duration = duration;
+    }
 
     void init_network();
     virtual vector<const Route*>* get_bidir_paths(uint32_t src, uint32_t dest, bool reverse);
@@ -224,6 +230,8 @@ private:
 
     double fail_bw_pct;
     bool _rts;
+    simtime_picosec _link_loss_burst_interarrival_time;
+    simtime_picosec _link_loss_burst_duration;
 };
 
 #endif

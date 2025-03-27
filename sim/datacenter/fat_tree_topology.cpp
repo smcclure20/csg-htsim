@@ -297,6 +297,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     _sender_qt = FAIR_PRIO;
     failed_links = 0;
     _rts = false;
+    flaky_links = 0;
     if (_link_latencies[TOR_TIER] == 0) {
         _hop_latency = timeFromUs((uint32_t)1);
     } else {
@@ -331,6 +332,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     failed_links = num_failed;
     fail_bw_pct = fail_pct;
     _rts = false;
+    flaky_links = 0;
   
     cout << "Fat tree topology (2) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -341,10 +343,12 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
                                  QueueLoggerFactory* logger_factory,
                                  EventList* ev,FirstFit * fit, queue_type qtype,
-                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts){
+                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts, simtime_picosec hoplatency){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
-    if (_link_latencies[TOR_TIER] == 0) {
+    if (hoplatency != 0) {
+        _hop_latency = hoplatency;
+    } else if (_link_latencies[TOR_TIER] == 0) {
         _hop_latency = timeFromUs((uint32_t)1);
     } else {
         _hop_latency = timeFromUs((uint32_t)0); 
@@ -360,6 +364,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     failed_links = num_failed;
     fail_bw_pct = fail_pct;
     _rts = rts;
+    flaky_links = 0;
 
     cout << "Fat tree topology (3) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -932,6 +937,11 @@ void FatTreeTopology::init_network(){
                         queues_nc_nup[core][agg][b] = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER]*fail_bw_pct, _queue_down[CORE_TIER],
                                                                DOWNLINK, CORE_TIER, false);
                         cout << "Adding link failure for agg_sw " << ntoa(agg) << " l " << ntoa(l) << " b " << ntoa(b) << endl;
+                    } else if ((l+agg*_agg_switches_per_pod)<flaky_links) {
+                        BaseQueue* q = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER], _queue_down[CORE_TIER],
+                                                               DOWNLINK, CORE_TIER, false);
+                        queues_nc_nup[core][agg][b] = q;
+                        q->setBurstyLossParameters(_link_loss_burst_interarrival_time, _link_loss_burst_duration);
                     } else {
                         queues_nc_nup[core][agg][b] = alloc_queue(queueLogger, _queue_down[CORE_TIER], DOWNLINK, CORE_TIER);
                     }

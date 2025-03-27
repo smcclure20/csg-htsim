@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
                                                lg, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
     */
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures);
+                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures, 0, false, 0);
 #endif
 
 #ifdef OV_FAT_TREE

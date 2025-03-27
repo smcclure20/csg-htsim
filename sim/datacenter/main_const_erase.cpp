@@ -80,6 +80,8 @@ int main(int argc, char **argv) {
     double rate_coef = 1.0;
     bool rts = false;
     int k = 3;
+    int flaky_links = 0;
+    simtime_picosec latency = 0;
 
     int i = 1;
     filename << "None";
@@ -139,6 +141,12 @@ int main(int argc, char **argv) {
             queue_type = COMPOSITE_ECN;
         } else if (!strcmp(argv[i],"-rts")){
             rts = true;
+        } else if (!strcmp(argv[i],"-flakylinks")){
+            flaky_links = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-lat")){
+            latency = atoi(argv[i+1]);
+            i++;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
@@ -221,7 +229,10 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts);
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency);
+    if (flaky_links > 0) {
+        top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
+    }
 #endif
 
 #ifdef OV_FAT_TREE
