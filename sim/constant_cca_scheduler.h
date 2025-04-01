@@ -41,9 +41,10 @@ class ConstBaseScheduler : public BaseQueue {
     }
     void add_src(int32_t flowid, ConstScheduledSrc* src);
     int src_queuesize(int32_t flowid) {return _queue_counts[flowid];}
+    map <flowid_t, int32_t> _queue_counts; 
  protected:
     uint32_t _pkt_count;
-    map <flowid_t, int32_t> _queue_counts;  // map from flow id to packet count
+     // map from flow id to packet count
     map <flowid_t, ConstScheduledSrc*> _srcs; // map from flow id to SubflowSrc for callbacks
 };
 

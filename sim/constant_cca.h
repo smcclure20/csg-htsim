@@ -126,7 +126,7 @@ public:
     uint32_t _addr;
     void set_app_limit(int pktps);
 
-    int queuesize(int flow_id);
+    int queuesize(uint32_t flow_id);
 
     uint64_t _highest_sent;  //seqno is in bytes
     uint64_t _packets_sent;
@@ -135,13 +135,16 @@ public:
 
     void disable_fast_recovery() {_fr_disabled = true;}
 
+    int _dupack_threshold = 3;
+    void set_dupack_thresh(int threshold) {_dupack_threshold = threshold;}
+
 protected:
     // connection state
     bool _established;
 
     //round trip time estimate
     simtime_picosec _rtt, _rto, _min_rto, _mdev;
-    simtime_picosec _min_rtt;
+    simtime_picosec _min_rtt, _max_rtt;
 
     // stuff needed for reno-like fast recovery
     uint32_t _inflate; // how much we're currently extending cwnd based off dup ack arrivals.
@@ -188,6 +191,9 @@ protected:
     // Account for NACK-based retransmissions when pacing 
     std::set<uint64_t> _pending_retransmit;
     bool deferred_retransmit;
+
+    uint32_t _repeated_nack_rtxs;
+    simtime_picosec _nack_backoff;
 
 private:
     void retransmit_packet();

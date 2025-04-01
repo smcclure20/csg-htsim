@@ -105,6 +105,7 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _rtt = 0;
     _rto = timeFromMs(1);
     _min_rto = timeFromUs((uint32_t)100);
+    _max_rtt = 0;
     _mdev = 0;
     _recoverq = 0;
     _in_fast_recovery = false;
@@ -116,7 +117,7 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _fr_disabled = false;
 
     // cc init
-    _const_cwnd = 10 * mss();  // initial window, in bytes  Note: values in paper are in packets; we're maintaining in bytes.
+    _const_cwnd = 100 * mss();  // initial window, in bytes  Note: values in paper are in packets; we're maintaining in bytes.
     _retransmit_cnt = 0;
     _can_decrease = true;
     _last_decrease = 0;  // initial value shouldn't matter if _can_decrease is true
@@ -158,6 +159,8 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _nack_rtxs = 0;
 
     deferred_retransmit = false;
+
+    _repeated_nack_rtxs = 0;
 }
 
 void
@@ -180,6 +183,11 @@ ConstantCcaSrc::update_rtt(simtime_picosec delay) {
             _rto = _rtt + 4*_mdev;
         }
         _min_rtt = min(_min_rtt, delay);
+        _max_rtt = max(_max_rtt, delay);
+        // _dupack_threshold = (int)((_max_rtt - _min_rtt) / _pacing_delay) + 1;
+        // if (_dupack_threshold < 3) {
+        //     _dupack_threshold = 3;
+        // }
     }
 
     if (_rto <_min_rto)
@@ -279,7 +287,7 @@ ConstantCcaSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
     // Not yet in fast recovery. What should we do instead?
     _dupacks++;
 
-    if (_dupacks!=3)  { // not yet serious worry
+    if (_dupacks!=_dupack_threshold)  { // not yet serious worry
         send_packets();
         return;
     }
@@ -306,6 +314,7 @@ int
 ConstantCcaSrc::send_packets() {
     if (_last_acked >= _flow_size && _completion_time == 0){ // should this be in receive packet instead?
         _completion_time = eventlist().now();
+        // _pacer.cancel();
         cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
     }
 
@@ -429,6 +438,7 @@ ConstantCcaSrc::send_next_packet() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << endl;
     _highest_sent += mss();  
     _packets_sent++;
+    _repeated_nack_rtxs = 0;
     
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -488,10 +498,21 @@ ConstantCcaSrc::retransmit_packet() {
 
 void 
 ConstantCcaSrc::retransmit_packet(uint64_t seqno) {
+    // if (_repeated_nack_rtxs > 1 ) {
+    //     _pacer.cancel();
+    //     _nack_backoff = _nack_backoff * 2;
+    //     if (_nack_backoff > timeFromMs(1)) {
+    //         _nack_backoff = timeFromMs(1);
+    //     }
+    //     _pacer.schedule_send(_nack_backoff);
+    // } else {
+    //     _nack_backoff = _pacing_delay;
+    // }
     if (!_pacer.allow_send()) {
         _pending_retransmit.insert(seqno);
         return;
     }
+    _repeated_nack_rtxs++;
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, mss(), _destination, _addr, _pathid);
 
     p->set_ts(eventlist().now());
@@ -728,7 +749,7 @@ ConstantCcaSrc::reroute(const Route &routeout) {
 }
 
 int
-ConstantCcaSrc::queuesize(int flow_id) {
+ConstantCcaSrc::queuesize(uint32_t flow_id) {
     return _scheduler->src_queuesize(flow_id);
 }
 

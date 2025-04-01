@@ -13,8 +13,8 @@ import os
 import sys
 from random import seed, shuffle
 #print(sys.argv)
-if len(sys.argv) != 7:
-    print("Usage: python gen_pemutation.py <filename> <nodes> <conns> <flowsize> <extrastarttime> <randseed>")
+if len(sys.argv) != 8:
+    print("Usage: python3 gen_permutationsubflow.py <filename> <nodes> <conns> <flowsize> <extrastarttime> <randseed> <subflows>")
     sys.exit()
 filename = sys.argv[1]
 nodes = int(sys.argv[2])
@@ -22,6 +22,7 @@ conns = int(sys.argv[3])
 flowsize = int(sys.argv[4])
 extrastarttime = float(sys.argv[5])
 randseed = int(sys.argv[6])
+subflows = int(sys.argv[7])
 
 print("Nodes: ", nodes)
 print("Connections: ", conns)
@@ -31,7 +32,11 @@ print("Random Seed ", randseed)
 
 f = open(filename, "w")
 print("Nodes", nodes, file=f)
-print("Connections", conns, file=f)
+print("Connections", conns*subflows, file=f)
+
+if int(flowsize/subflows) != flowsize/subflows:
+    print("Flowsize must be divisible by subflows")
+    sys.exit()
 
 if randseed != 0:
     seed(randseed)
@@ -49,7 +54,6 @@ for c in range(int(conns/nodes)):
     all_srcs.extend(srcs)
     all_dsts.extend(dsts)
 
-
 #print(srcs)
 #print(dsts)
 
@@ -64,9 +68,14 @@ for c in range(int(conns/nodes)):
             all_dsts[i+ nodes*c] = tmp
 
 #print(dsts)
+complete_srcs = []
+complete_dsts = []
+for n in range(subflows):
+    complete_srcs.extend(all_srcs)
+    complete_dsts.extend(all_dsts)
 
-for n in range(conns):
-    out = str(all_srcs[n]) + "->" + str(all_dsts[n]) + " id " + str(n+1) + " start " + str(int(extrastarttime * 1000000)) + " size " + str(flowsize)
+for n in range(conns * subflows):
+    out = str(complete_srcs[n]) + "->" + str(complete_dsts[n]) + " id " + str(n+1) + " start " + str(int(extrastarttime * 1000000)) + " size " + str(int(flowsize/subflows))
     print(out, file=f)
 
 f.close()

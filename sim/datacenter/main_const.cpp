@@ -82,6 +82,7 @@ int main(int argc, char **argv) {
     int flaky_links = 0;
     simtime_picosec latency = 0;
     bool disable_fr = false;
+    int dupack_thresh = 3;
 
     int i = 1;
     filename << "None";
@@ -149,7 +150,10 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-nofr")){
             disable_fr = true;
-        }else if (!strcmp(argv[i],"-tsample")){
+        } else if (!strcmp(argv[i],"-dup")){
+            dupack_thresh = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
         } else if (!strcmp(argv[i],"-ratecoef")){
@@ -315,6 +319,10 @@ int main(int argc, char **argv) {
         connection* crt = all_conns->at(c);
         uint32_t src = crt->src;
         uint32_t dest = crt->dst;
+        if (src == dest) {
+            cout << "Self-loop: " << src << endl;
+            exit(1);
+        }
         
         connID++;
         if (!net_paths[src][dest]) {
@@ -347,6 +355,15 @@ int main(int argc, char **argv) {
             sender->set_plb_threshold_ecn(plb_ecn);
         } else if (host_lb == SPRAY) {
             sender->set_spraying();
+        }
+        if (dupack_thresh != 3) {
+            int k = (4*no_of_nodes )^ (1/3)
+            // if (src % (k/2) ==  dst % (k/2)) { // TODO: make this depend on how many hops away the two are
+            //     sender->set_dupack_thresh();
+            // } else {
+            //     sender->set_dupack_thresh(dupack_thresh);
+            // }
+            sender->set_dupack_thresh(dupack_thresh);
         }
         srcs.push_back(sender);
         sink = new ConstantCcaSink();
