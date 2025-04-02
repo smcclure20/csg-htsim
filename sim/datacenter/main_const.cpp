@@ -357,7 +357,7 @@ int main(int argc, char **argv) {
             sender->set_spraying();
         }
         if (dupack_thresh != 3) {
-            int k = (4*no_of_nodes )^ (1/3)
+            int k = (4*no_of_nodes )^ (1/3);
             // if (src % (k/2) ==  dst % (k/2)) { // TODO: make this depend on how many hops away the two are
             //     sender->set_dupack_thresh();
             // } else {
@@ -448,12 +448,15 @@ int main(int argc, char **argv) {
         // simtime_picosec offset = (interpacket_delay/connCount) * (connID-1);
         // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
         // simtime_picosec starttime = crt->start + offset;
-        sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), dest, *routeout, *routein);
+        sender->set_paths(net_paths[src][dest]);
+        sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), no_of_subflows, dest);
         // sender->set_paths(net_paths[src][dest]);
 
         if (route_strategy != SOURCE_ROUTE) {
-            top->add_host_port(src, sender->flow().flow_id(), sender);
-            top->add_host_port(dest, sender->flow().flow_id(), sink);
+            for (ConstantCcaSubflowSrc* sub : sender->subflows()) {
+                top->add_host_port(src, sub->flow().flow_id(), sub);
+                top->add_host_port(dest, sub->flow().flow_id(), sink);
+            }
         }
     }
     //    ShortFlows* sf = new ShortFlows(2560, eventlist, net_paths,conns,lg, &swiftRtxScanner);
@@ -472,7 +475,7 @@ int main(int argc, char **argv) {
                 bool all_done = true;
                 list <ConstantCcaSrc*>::iterator src_i;
                 for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
-                    if ((*src_i)->last_acked() < (*src_i)->_flow_size) {
+                    if ((*src_i)->highest_dsn_ack() < (*src_i)->_flow_size) {
                         all_done = false;
                         break;
                     }
@@ -537,21 +540,17 @@ int main(int argc, char **argv) {
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantCcaSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack << "," << sink->_nacks_sent << "," << (*src_i)->total_dupacks() << "," << (*src_i)->_packets_sent <<  endl;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << (*src_i)->packets_sent() <<  endl;
     }
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
     for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-        cout << (*sink_i)->nodename() << " received " << (*sink_i)->_cumulative_ack << " bytes, " << (*sink_i)->drops() << " drops" << endl;
-        if ((*sink_i)->_cumulative_ack < 2004000) {
+        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes, " << (*sink_i)->drops() << " drops" << endl;
+        if ((*sink_i)->cumulative_ack() < 2004000) {
             cout << "Incomplete flow " << endl;
             ConstantCcaSink* sink = (*sink_i);
             ConstantCcaSrc* counterpart_src = sink->_src;
-            if (counterpart_src->_completion_time == 0) {
-                ConstantCcaSrc test = *counterpart_src;
-                cout << "Src, sent: " << test._highest_sent << "; last acked " << test.last_acked() << endl;
-            }
-            cout << "Src, sent: " << counterpart_src->_highest_sent << "; last acked " << counterpart_src->last_acked() << endl;
+            cout << "Src, sent: " << counterpart_src->_highest_dsn_sent << "; last acked " << counterpart_src->highest_dsn_ack() << endl;
         }
     }
     /*

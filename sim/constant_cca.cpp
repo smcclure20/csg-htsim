@@ -123,6 +123,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _plb_interval = timeFromSec(1);  // disable PLB til we've seen some traffic
     _path_index = 0;  
     _last_good_path = src.eventlist().now();
+    _plb_threshold_ecn = src._plb_threshold_ecn;
     
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
@@ -506,6 +507,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     simtime_picosec ts_echo;
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     ConstantCcaAck::seq_t ackno = p->ackno();
+    ConstantCcaAck::seq_t ds_ackno = p->ds_ackno();
     // _acks_received.push_back(ackno);
 
     if (p->is_nack()) {
@@ -574,6 +576,8 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
             move_path_flow_label();
         }
     }
+
+    _src.update_dsn_ack(ds_ackno);
 
     handle_ack(ackno);
 }
@@ -730,6 +734,7 @@ ConstantCcaSrc::connect(ConstantCcaSink& sink, simtime_picosec starttime, uint32
 
 void ConstantCcaSrc::update_dsn_ack(ConstantCcaAck::seq_t ds_ackno) {
     //cout << "Flow " << _name << " dsn ack " << ds_ackno << endl;
+    _highest_dsn_ack = max(_highest_dsn_ack, ds_ackno);
     if (ds_ackno >= _flow_size && _completion_time == 0){
         _completion_time = eventlist().now();
         cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
@@ -819,6 +824,42 @@ void ConstantCcaSrc::doNextEvent() {
     startflow();
 }
 
+uint32_t 
+ConstantCcaSrc::drops() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSrc* subflow : _subs) {
+        total += subflow->drops();
+    }
+    return total;
+}
+
+uint32_t 
+ConstantCcaSrc::rtos() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSrc* subflow : _subs) {
+        total += subflow->rtos();
+    }
+    return total;
+}
+
+uint32_t 
+ConstantCcaSrc::total_dupacks() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSrc* subflow : _subs) {
+        total += subflow->total_dupacks();
+    }
+    return total;
+}
+
+uint32_t
+ConstantCcaSrc::packets_sent() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSrc* subflow : _subs) {
+        total += subflow->packets_sent();
+    }
+    return total;
+}
+
 ////////////////////////////////////////////////////////////////
 // SINK
 ////////////////////////////////////////////////////////////////
@@ -857,6 +898,33 @@ ConstantCcaSink::receivePacket(Packet& pkt) {
         // hole in sequence space
         _dsn_received.insert(dsn);
     }
+}
+
+uint32_t 
+ConstantCcaSink::drops() {
+    uint64_t total;
+    for (ConstantCcaSubflowSink* subflow : _subs) {
+        total += subflow->drops();
+    }
+    return total;
+}
+
+uint32_t 
+ConstantCcaSink::spurious_retransmits() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSink* subflow : _subs) {
+        total += subflow->spurious_retransmits();
+    }
+    return total;
+}
+
+uint32_t 
+ConstantCcaSink::nacks_sent() {
+    uint32_t total = 0;
+    for (ConstantCcaSubflowSink* subflow : _subs) {
+        total += subflow->nacks_sent();
+    }
+    return total;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -948,16 +1016,6 @@ ConstantCcaSubflowSink::send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t
 
     nack->sendOn();
     _nacks_sent++;
-}
- 
-uint64_t
-ConstantCcaSubflowSink::cumulative_ack() {
-    // this is needed by some loggers.  If we ever need it, figure out what it should really return
-    return _cumulative_ack;
-} 
-
-uint32_t ConstantCcaSubflowSink::spurious_retransmits() {
-    return _spurious_retransmits;
 }
 
 ////////////////////////////////////////////////////////////////

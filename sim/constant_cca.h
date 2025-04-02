@@ -74,6 +74,8 @@ public:
         return dsn;
     }
 
+    ConstantCcaPacket::seq_t highest_dsn_ack() {return _highest_dsn_ack;}
+
     bool check_stoptime();
     
     void set_cwnd(uint32_t cwnd);
@@ -84,6 +86,8 @@ public:
     void permute_paths();
     bool _plb;
     inline bool plb() const {return _plb;}
+    uint16_t _plb_threshold_ecn;
+    void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
 
     // packet switching
     bool _spraying;
@@ -100,6 +104,7 @@ public:
     // stats
     simtime_picosec _completion_time;
     simtime_picosec _start_time;
+    ConstantCcaPacket::seq_t _highest_dsn_ack;
 
     uint16_t _mss;
     inline uint16_t mss() const {return _mss;}
@@ -121,6 +126,11 @@ public:
 
     int _dupack_threshold = 3;
     void set_dupack_thresh(int threshold) {_dupack_threshold = threshold;}
+
+    uint32_t drops();
+    uint32_t rtos();
+    uint32_t total_dupacks();
+    uint32_t packets_sent();
 
 private:
     // Housekeeping
@@ -162,12 +172,12 @@ public:
 
     virtual void connect(ConstantCcaSink& sink, const Route& routeout, const Route& routein, ConstBaseScheduler* scheduler); // for packet switching
 
-    // should really be private, but loggers want to see:
     uint32_t _maxcwnd;
     uint32_t drops() {return _drops;};
 
     uint32_t rtos() {return _rto_count;};
     uint32_t total_dupacks() {return _total_dupacks;};
+    uint32_t packets_sent() const { return _packets_sent; }
 
     ConstantCcaSubflowSink* _subflow_sink;
 
@@ -268,14 +278,15 @@ public:
     set <ConstantCcaPacket::seq_t> _dsn_received; // use a map because multipath packets will arrive out of order
 
     ConstantCcaSrc* _src;
-    uint64_t cumulative_ack();
+    uint64_t cumulative_ack() { return _cumulative_data_ack;};
     uint32_t drops();
     uint32_t spurious_retransmits();
+    uint32_t nacks_sent();
 
     vector <ConstantCcaSubflowSink*> _subs; // public so the logger can see
 private:
     // Connectivity, called by Src
-    ConstantCcaSubflowSink* connect(ConstantCcaSrc& src, ConstantCcaSubflowSrc&, const Route& route);
+    ConstantCcaSubflowSink* connect(ConstantCcaSrc& src, ConstantCcaSubflowSrc& subflow_src, const Route& route);
     string _nodename;
     ReorderBufferLogger* _buffer_logger;
 };
@@ -288,15 +299,17 @@ public:
 
     void receivePacket(Packet& pkt);
     ConstantCcaAck::seq_t _cumulative_ack; // seqno of the last byte in the packet we have
-    uint64_t cumulative_ack();
-    uint32_t _drops;
-    uint32_t drops() {return _drops;}
+    uint64_t cumulative_ack() {return _cumulative_ack;}
 
     uint64_t _packets;
 
     // stats
     uint32_t _spurious_retransmits;
+    inline uint32_t spurious_retransmits() const { return _spurious_retransmits; }
+    uint32_t _drops;
+    inline uint32_t drops() {return _drops;}
     uint32_t _nacks_sent;
+    inline uint32_t nacks_sent() const { return _nacks_sent; }
 
     set<ConstantCcaAck::seq_t> _received; 
     virtual const string& nodename() { return _nodename; }
