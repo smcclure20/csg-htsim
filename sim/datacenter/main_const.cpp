@@ -545,7 +545,7 @@ int main(int argc, char **argv) {
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
     for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes, " << (*sink_i)->drops() << " drops" << endl;
+        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes" << endl;
         if ((*sink_i)->cumulative_ack() < 2004000) {
             cout << "Incomplete flow " << endl;
             ConstantCcaSink* sink = (*sink_i);
