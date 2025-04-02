@@ -17,11 +17,12 @@ public:
     typedef uint64_t seq_t;
 
     inline static ConstantCcaPacket* newpkt(PacketFlow &flow, const Route &route, 
-                                      seq_t seqno, int size, uint32_t dst, uint32_t src, uint32_t pathid) {
+                                      seq_t seqno, seq_t dsn, int size, uint32_t dst, uint32_t src, uint32_t pathid) {
         ConstantCcaPacket* p = _packetdb.allocPacket();
         p->set_route(flow,route,size,seqno+size-1); // The Swift sequence number is the first byte of the packet; I will ID the packet by its last byte.
         p->_type = CONSTCCA;
         p->_seqno = seqno;
+        p->_dsn = dsn;
         p->_syn = false;
         p->set_dst(dst);
         p->set_src(src);
@@ -32,7 +33,7 @@ public:
 
     inline static ConstantCcaPacket* new_syn_pkt(PacketFlow &flow, const Route &route, 
                                            seq_t seqno, int size, uint32_t dst, uint32_t src, uint32_t pathid) {
-        ConstantCcaPacket* p = newpkt(flow,route,seqno,size,dst,src,pathid);
+        ConstantCcaPacket* p = newpkt(flow,route,seqno,0,size,dst,src,pathid);
         p->_syn = true;
         return p;
     }
@@ -40,6 +41,7 @@ public:
     void free() {_packetdb.freePacket(this);}
     virtual ~ConstantCcaPacket(){}
     inline seq_t seqno() const {return _seqno;}
+    inline seq_t dsn() const {return _dsn;}
     inline simtime_picosec ts() const {return _ts;}
     inline void set_ts(simtime_picosec ts) {_ts = ts;}
     virtual PktPriority priority() const {return Packet::PRIO_LO;}  // change this if you want to use swift with priority queues
@@ -47,6 +49,7 @@ public:
 
 protected:
     seq_t _seqno;
+    seq_t _dsn;
     bool _syn;
     simtime_picosec _ts;
     static PacketDB<ConstantCcaPacket> _packetdb;
@@ -57,13 +60,14 @@ public:
     typedef ConstantCcaPacket::seq_t seq_t;
 
     inline static ConstantCcaAck* newpkt(PacketFlow &flow, const Route &route, 
-                                   seq_t seqno, seq_t ackno,
+                                   seq_t seqno, seq_t ackno, seq_t ds_ackno,
                                    simtime_picosec ts_echo, uint32_t dst, uint32_t src, uint32_t pathid) {
         ConstantCcaAck* p = _packetdb.allocPacket();
         p->set_route(flow,route,ACKSIZE,ackno);
         p->_type = CONSTCCAACK;
         p->_seqno = seqno;
         p->_ackno = ackno;
+        p->_ds_ackno = ds_ackno;
         p->_ts_echo = ts_echo;
         p->set_src(src);
         p->set_dst(dst);
@@ -74,12 +78,13 @@ public:
     }
 
     inline static ConstantCcaAck* newnack(PacketFlow &flow, const Route &route, 
-                                   seq_t seqno, seq_t ackno,
+                                   seq_t seqno, seq_t ackno, seq_t ds_ackno,
                                    simtime_picosec ts_echo, uint32_t dst, uint32_t src, uint32_t pathid) {
         ConstantCcaAck* p = _packetdb.allocPacket();
         p->set_route(flow,route,ACKSIZE,ackno);
         p->_type = CONSTCCAACK;
         p->_seqno = seqno;
+        p->_ds_ackno = ds_ackno;
         p->_ackno = ackno;
         p->_ts_echo = ts_echo;
         p->set_src(src);
