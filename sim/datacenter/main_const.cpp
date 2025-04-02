@@ -540,7 +540,7 @@ int main(int argc, char **argv) {
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantCcaSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << (*src_i)->packets_sent() <<  endl;
+        flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << (*src_i)->packets_sent() <<  endl;
     }
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;

@@ -749,6 +749,7 @@ ConstantCcaSrc::connect(ConstantCcaSink& sink, simtime_picosec starttime, uint32
         subflow->connect(sink, *routeout, *routeback, _scheduler);
         _rtx_timer_scanner->registerSubflow(*subflow);
     }
+    _start_time = starttime;
     eventlist().sourceIsPending(*this,starttime);
     // cout << "starttime " << timeAsUs(starttime) << endl;
 }
