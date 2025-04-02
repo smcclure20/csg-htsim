@@ -129,7 +129,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _RFC2988_RTO_timeout = timeInf;
 
     _mss = Packet::data_packet_size();
-    _const_cwnd = 10 * _mss; 
+    _const_cwnd = 100 * _mss; 
     _maxcwnd = 0xffffffff;//200*_mss;
 
     _min_cwnd = 10 * _mss;  // guess - if we go less than 10 bytes, we probably get into rounding 
@@ -293,11 +293,11 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
 
 int 
 ConstantCcaSubflowSrc::send_packets() {
-    if (_last_acked >= _src._flow_size && _src._completion_time == 0){ // should this be in receive packet instead?
-        _src._completion_time = eventlist().now();
-        // _pacer.cancel();
-        cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
-    }
+    // if (_last_acked >= _src._flow_size && _src._completion_time == 0){ // should this be in receive packet instead?
+    //     _src._completion_time = eventlist().now();
+    //     // _pacer.cancel();
+    //     cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
+    // }
 
     // if (deferred_retransmit) { // should also check pacer? How else could this be called?
     //     retransmit_packet();
