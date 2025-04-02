@@ -712,8 +712,28 @@ ConstantCcaSubflowSrc::reroute(const Route &routeout) {
 //  CONSTANT CCA SRC
 ////////////////////////////////////////////////////////////////
 
+ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventList &eventlist, uint32_t addr, simtime_picosec pacing_delay, TrafficLogger* pkt_logger)
+    : EventSource(eventlist,"constcca"),  _traffic_logger(pkt_logger), _rtx_timer_scanner(&rtx_scanner)
+{
+    // TODO @smcclure20: (1) check plb implementation, (2) move all route stuff to a source-routing bool
+    _mss = Packet::data_packet_size();
+    _scheduler = NULL;
+    _flow_size = ((uint64_t)1)<<63;
+    _stop_time = 0;
+    _stopped = false;
+    _highest_dsn_sent = 0;
+    _completion_time = 0;
+    _highest_dsn_ack = 0;
+    // PLB init
+    _plb = false; // enable using enable_plb()
+    _spraying = false;
+
+    _addr = addr;
+}
+
 void 
 ConstantCcaSrc::connect(ConstantCcaSink& sink, simtime_picosec starttime, uint32_t no_of_subflows, uint32_t destination) {
+    _destination = destination;
     _sink=&sink;
     for (uint32_t i = 0; i < no_of_subflows; i++) {
         ConstantCcaSubflowSrc* subflow = new ConstantCcaSubflowSrc(*this, _traffic_logger, _subs.size(), _pacing_delay * no_of_subflows);
@@ -827,8 +847,8 @@ void ConstantCcaSrc::doNextEvent() {
 uint32_t 
 ConstantCcaSrc::drops() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSrc* subflow : _subs) {
-        total += subflow->drops();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->drops();
     }
     return total;
 }
@@ -836,8 +856,8 @@ ConstantCcaSrc::drops() {
 uint32_t 
 ConstantCcaSrc::rtos() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSrc* subflow : _subs) {
-        total += subflow->rtos();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->rtos();
     }
     return total;
 }
@@ -845,8 +865,8 @@ ConstantCcaSrc::rtos() {
 uint32_t 
 ConstantCcaSrc::total_dupacks() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSrc* subflow : _subs) {
-        total += subflow->total_dupacks();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->total_dupacks();
     }
     return total;
 }
@@ -854,8 +874,8 @@ ConstantCcaSrc::total_dupacks() {
 uint32_t
 ConstantCcaSrc::packets_sent() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSrc* subflow : _subs) {
-        total += subflow->packets_sent();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->packets_sent();
     }
     return total;
 }
@@ -903,8 +923,8 @@ ConstantCcaSink::receivePacket(Packet& pkt) {
 uint32_t 
 ConstantCcaSink::drops() {
     uint64_t total;
-    for (ConstantCcaSubflowSink* subflow : _subs) {
-        total += subflow->drops();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->drops();
     }
     return total;
 }
@@ -912,8 +932,8 @@ ConstantCcaSink::drops() {
 uint32_t 
 ConstantCcaSink::spurious_retransmits() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSink* subflow : _subs) {
-        total += subflow->spurious_retransmits();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->spurious_retransmits();
     }
     return total;
 }
@@ -921,8 +941,8 @@ ConstantCcaSink::spurious_retransmits() {
 uint32_t 
 ConstantCcaSink::nacks_sent() {
     uint32_t total = 0;
-    for (ConstantCcaSubflowSink* subflow : _subs) {
-        total += subflow->nacks_sent();
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->nacks_sent();
     }
     return total;
 }
@@ -1026,6 +1046,12 @@ ConstantCcaRtxTimerScanner::ConstantCcaRtxTimerScanner(simtime_picosec scanPerio
     : EventSource(eventlist,"RtxScanner"), _scanPeriod(scanPeriod){
     eventlist.sourceIsPendingRel(*this, _scanPeriod);
 }
+
+void 
+ConstantCcaRtxTimerScanner::registerSubflow(ConstantCcaSubflowSrc &subflow_src) {
+    _srcs.push_back(&subflow_src);
+}
+
 
 void ConstantCcaRtxTimerScanner::doNextEvent() {
     simtime_picosec now = eventlist().now();

@@ -23,6 +23,8 @@
 
 class ConstantCcaSrc;
 class ConstantCcaSink;
+class ConstantCcaSubflowSrc;
+class ConstantCcaSubflowSink;
 class ConstantCcaRtxTimerScanner;
 class ConstBaseScheduler;
 
@@ -261,8 +263,50 @@ private:
 
 
 /**********************************************************************************/
-/** SINK                                                                 **/
+/**  SUBFLOW SINK                                                                 **/
 /**********************************************************************************/
+
+class ConstantCcaSubflowSink : public PacketSink, public DataReceiver {
+    friend class ConstantCcaSubflowSrc;
+    friend class ConstantCcaSink;
+public:
+    ConstantCcaSubflowSink(ConstantCcaSink& sink);
+
+    void receivePacket(Packet& pkt);
+    ConstantCcaAck::seq_t _cumulative_ack; // seqno of the last byte in the packet we have
+    uint64_t cumulative_ack() {return _cumulative_ack;}
+
+    uint64_t _packets;
+
+    // stats
+    uint32_t _spurious_retransmits;
+    uint32_t spurious_retransmits() { return _spurious_retransmits; }
+    uint32_t _drops;
+    uint32_t drops() {return _drops;}
+    uint32_t _nacks_sent;
+    uint32_t nacks_sent() { return _nacks_sent; }
+
+    set<ConstantCcaAck::seq_t> _received; 
+    virtual const string& nodename() { return _nodename; }
+
+
+    ConstantCcaSubflowSrc* _subflow_src;
+    ConstantCcaSink& _sink;
+
+private:
+    // Connectivity
+    void connect(ConstantCcaSubflowSrc& src, const Route& route);
+    const Route* _route;
+    string _nodename;
+
+    // Mechanism
+    void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid);
+    void send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno, uint64_t dsn);
+};
+
+////////////////////////////////////////////////////////////////////
+/// SINK
+////////////////////////////////////////////////////////////////////
 
 class ConstantCcaSink : public PacketSink, public DataReceiver {
     friend class ConstantCcaSrc;
@@ -289,46 +333,6 @@ private:
     ConstantCcaSubflowSink* connect(ConstantCcaSrc& src, ConstantCcaSubflowSrc& subflow_src, const Route& route);
     string _nodename;
     ReorderBufferLogger* _buffer_logger;
-};
-
-class ConstantCcaSubflowSink : public PacketSink, public DataReceiver {
-    friend class ConstantCcaSubflowSrc;
-    friend class ConstantCcaSink;
-public:
-    ConstantCcaSubflowSink(ConstantCcaSink& sink);
-
-    void receivePacket(Packet& pkt);
-    ConstantCcaAck::seq_t _cumulative_ack; // seqno of the last byte in the packet we have
-    uint64_t cumulative_ack() {return _cumulative_ack;}
-
-    uint64_t _packets;
-
-    // stats
-    uint32_t _spurious_retransmits;
-    inline uint32_t spurious_retransmits() const { return _spurious_retransmits; }
-    uint32_t _drops;
-    inline uint32_t drops() {return _drops;}
-    uint32_t _nacks_sent;
-    inline uint32_t nacks_sent() const { return _nacks_sent; }
-
-    set<ConstantCcaAck::seq_t> _received; 
-    virtual const string& nodename() { return _nodename; }
-
-
-    ConstantCcaSubflowSrc* _subflow_src;
-    ConstantCcaSink& _sink;
-
-    uint32_t spurious_retransmits();
-
-private:
-    // Connectivity
-    void connect(ConstantCcaSubflowSrc& src, const Route& route);
-    const Route* _route;
-    string _nodename;
-
-    // Mechanism
-    void send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid);
-    void send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno, uint64_t dsn);
 };
 
 class ConstantCcaRtxTimerScanner : public EventSource {
