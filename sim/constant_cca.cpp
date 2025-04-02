@@ -93,7 +93,7 @@ ConstantCcaPacer::doNextEvent() {
 ////////////////////////////////////////////////////////////////
 
 ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger* pktlogger, int subflow_id, simtime_picosec pacing_delay)
-    : EventSource(src.eventlist(), "swift_subflow_src"), _flow(pktlogger), _src(src), _pacer(*this, src.eventlist(),pacing_delay)
+    : EventSource(src.eventlist(), "swift_subflow_src"), _flow(pktlogger), _src(src), _pacer(*this, src.eventlist(), pacing_delay)
 {
     _highest_sent = 0;
     _packets_sent = 0;
@@ -729,6 +729,7 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _spraying = false;
 
     _addr = addr;
+    _pacing_delay = pacing_delay;
 }
 
 void 
@@ -957,6 +958,7 @@ ConstantCcaSubflowSink::ConstantCcaSubflowSink(ConstantCcaSink& sink)
     _cumulative_ack = 0;
     _packets = 0;
     _spurious_retransmits = 0;
+    _drops = 0;
     _nacks_sent = 0;
     _subflow_src = NULL;
     _nodename = "ConstantCcaSubflowSink";
