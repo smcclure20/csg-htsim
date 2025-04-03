@@ -7,7 +7,7 @@ INCLUDE= -I/$(CRT)/.. -I$(CRT)
 LIB=-L..
 DEPS=../libhtsim.a
 
-all:	htsim_tcp htsim_ndp htsim_roce htsim_swift htsim_hpcc htsim_eqds htsim_constcca htsim_consterase
+all:	htsim_tcp htsim_ndp htsim_roce htsim_swift htsim_hpcc htsim_eqds htsim_constcca htsim_consterase htsim_constcca_old
 
 
 htsim_tcp: main_tcp.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o dragon_fly_topology.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o
@@ -34,6 +34,9 @@ htsim_swift: main_swift.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topol
 htsim_constcca: main_const.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o
 	$(CC) $(CFLAGS) firstfit.o main_const.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o $(LIB) -lhtsim -o htsim_constcca
 
+htsim_constcca_old: main_const_old.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o
+	$(CC) $(CFLAGS) firstfit.o main_const_old.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o $(LIB) -lhtsim -o htsim_constcca_old
+
 htsim_consterase: main_const_erase.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o
 	$(CC) $(CFLAGS) firstfit.o main_const_erase.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o $(LIB) -lhtsim -o htsim_consterase
 
@@ -54,6 +57,9 @@ main_swift.o: main_swift.cpp ${DEPS}
 
 main_const.o: main_const.cpp ${DEPS}
 	$(CC) $(INCLUDE) $(CFLAGS) -c main_const.cpp 
+
+main_const_old.o: main_const_old.cpp ${DEPS}
+	$(CC) $(INCLUDE) $(CFLAGS) -c main_const_old.cpp 
 
 main_const_erase.o: main_const_erase.cpp ${DEPS}
 	$(CC) $(INCLUDE) $(CFLAGS) -c main_const_erase.cpp 
@@ -107,4 +113,4 @@ main_eqds.o: main_eqds.cpp
 	$(CC) $(INCLUDE) $(CFLAGS) -c main_eqds.cpp 
 
 clean:	
-	rm -f *.o htsim_ndp* htsim_swift* htsim_tcp* htsim_dctcp* htsim_roce* htsim_hpcc* htsim_const* htsim_const_erase*
+	rm -f *.o htsim_ndp* htsim_swift* htsim_tcp* htsim_dctcp* htsim_roce* htsim_hpcc* htsim_const* htsim_const_erase* htsim_const_old*

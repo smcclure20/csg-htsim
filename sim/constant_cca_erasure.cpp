@@ -155,7 +155,7 @@ ConstantErasureCcaSrc::send_next_packet() {
     }
     _deferred_send = false;
 
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _current_seqno, mss(), _destination, _addr, _pathid);
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _current_seqno, 0, mss(), _destination, _addr, _pathid);
     _packets_sent++;  
     _current_seqno += mss();
     
@@ -385,7 +385,7 @@ ConstantErasureCcaSink::receivePacket(Packet& pkt) {
 
     // if (_bytes_received >= _src->flow_size()) {
         ConstantCcaAck* newAck = ConstantCcaAck::newpkt(p->flow(), *_route, 
-                                    0, _bytes_received,
+                                    0, _bytes_received, 0,
                                     p->ts(), p->src(), p->dst(), p->pathid());
 
         newAck->sendOn();

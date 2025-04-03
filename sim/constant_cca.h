@@ -49,7 +49,7 @@ class ConstantCcaSrc : public EventSource {
     friend class ConstantCcaRtxTimerScanner;
 public:
     ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventList &eventlist, uint32_t addr, simtime_picosec pacing_delay, TrafficLogger* pkt_logger);
-    virtual void connect(ConstantCcaSink& sink, simtime_picosec startTime, uint32_t no_of_subflows, uint32_t destination); 
+    virtual void connect(ConstantCcaSink& sink, simtime_picosec startTime, uint32_t no_of_subflows, uint32_t destination, const Route& routeout, const Route& routein); 
     void startflow();
 
     void doNextEvent();
@@ -206,8 +206,6 @@ protected:
 
     map <ConstantCcaPacket::seq_t, ConstantCcaPacket::seq_t> _dsn_map;  // map of subflow seqno to data seqno
 
-    bool _fr_disabled; // fast recovery disabled
-
     uint32_t _min_cwnd;
     uint32_t _max_cwnd;
 
@@ -267,7 +265,7 @@ private:
 /**********************************************************************************/
 
 class ConstantCcaSubflowSink : public PacketSink, public DataReceiver {
-    friend class ConstantCcaSubflowSrc;
+    friend class ConstantCcaSrc;
     friend class ConstantCcaSink;
 public:
     ConstantCcaSubflowSink(ConstantCcaSink& sink);
@@ -339,7 +337,7 @@ class ConstantCcaRtxTimerScanner : public EventSource {
 public:
     ConstantCcaRtxTimerScanner(simtime_picosec scanPeriod, EventList& eventlist);
     void doNextEvent();
-    void registerSubflow(ConstantCcaSubflowSrc &subflow_src);
+    void registerSubflow(ConstantCcaSubflowSrc* subflow_src);
 private:
     simtime_picosec _scanPeriod;
     std::vector<ConstantCcaSubflowSrc*> _srcs;

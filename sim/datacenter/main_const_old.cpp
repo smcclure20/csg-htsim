@@ -13,7 +13,7 @@
 #include "logfile.h"
 #include "loggers.h"
 #include "clock.h"
-#include "constant_cca.h"
+#include "constant_cca_old.h"
 #include "compositequeue.h"
 //#include "firstfit.h"
 #include "topology.h"
@@ -225,12 +225,12 @@ int main(int argc, char **argv) {
     }
 #endif
     
-    ConstantCcaSrc* sender;
-    ConstantCcaSink* sink;
+    ConstantCcaOSrc* sender;
+    ConstantCcaOSink* sink;
 
     Route* routeout, *routein;
 
-    ConstantCcaRtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
+    ConstantCcaORtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
@@ -307,8 +307,8 @@ int main(int argc, char **argv) {
     // used just to print out stats data at the end
     list <const Route*> routes;
     
-    list <ConstantCcaSrc*> srcs;
-    list <ConstantCcaSink*> sinks;
+    list <ConstantCcaOSrc*> srcs;
+    list <ConstantCcaOSink*> sinks;
     // initialize all sources/sinks
 
     uint32_t connID = 0;
@@ -339,7 +339,8 @@ int main(int argc, char **argv) {
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
         simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
-        sender = new ConstantCcaSrc(rtxScanner, eventlist, src, interpacket_delay, NULL);  
+        sender = new ConstantCcaOSrc(rtxScanner, eventlist, src, interpacket_delay, NULL);  
+        sender->set_cwnd(cwnd*Packet::data_packet_size());
 
         if (disable_fr) {
             sender->disable_fast_recovery(); // no fast recovery when we have packet trimming
@@ -365,7 +366,7 @@ int main(int argc, char **argv) {
             sender->set_dupack_thresh(dupack_thresh);
         }
         srcs.push_back(sender);
-        sink = new ConstantCcaSink();
+        sink = new ConstantCcaOSink();
         sinks.push_back(sink);
 
         sender->setName("constcca_" + ntoa(src) + "_" + ntoa(dest));
@@ -447,19 +448,12 @@ int main(int argc, char **argv) {
         // simtime_picosec offset = (interpacket_delay/connCount) * (connID-1);
         // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
         // simtime_picosec starttime = crt->start + offset;
-        sender->set_paths(net_paths[src][dest]);
-        sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), no_of_subflows, dest, *routeout, *routein);
-        sender->set_cwnd(cwnd*Packet::data_packet_size());
+        sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), dest, *routeout, *routein);
         // sender->set_paths(net_paths[src][dest]);
 
         if (route_strategy != SOURCE_ROUTE) {
-            for (int i = 0; i < no_of_subflows; i++) {
-                ConstantCcaSubflowSrc* sub = sender->subflows()[i];
-                ConstantCcaSubflowSink* sub_sink = sink->_subs[i];
-                top->add_host_port(src, sub->flow().flow_id(), sub);
-                top->add_host_port(dest, sub->flow().flow_id(), sub_sink);
-                cout << "Added subflow " << sub->flow().flow_id() << " from " << src << " to " << dest << endl;
-            }
+            top->add_host_port(src, sender->flow().flow_id(), sender);
+            top->add_host_port(dest, sender->flow().flow_id(), sink);
         }
     }
     //    ShortFlows* sf = new ShortFlows(2560, eventlist, net_paths,conns,lg, &swiftRtxScanner);
@@ -476,9 +470,9 @@ int main(int argc, char **argv) {
             if (endtime == 0) {
                 // Iterate through sources to see if they have completed the flows
                 bool all_done = true;
-                list <ConstantCcaSrc*>::iterator src_i;
+                list <ConstantCcaOSrc*>::iterator src_i;
                 for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
-                    if ((*src_i)->highest_dsn_ack() < (*src_i)->_flow_size) {
+                    if ((*src_i)->last_acked() < (*src_i)->_flow_size) {
                         all_done = false;
                         break;
                     }
@@ -535,25 +529,29 @@ int main(int argc, char **argv) {
 
     /*for (uint32_t i = 0; i < 10; i++)
         cout << "Hop " << i << " Count " << counts[i] << endl; */
-    list <ConstantCcaSrc*>::iterator src_i;
+    list <ConstantCcaOSrc*>::iterator src_i;
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
     flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent" << endl;
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
-        ConstantCcaSink* sink = (*src_i)->_sink;
+        ConstantCcaOSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << (*src_i)->packets_sent() <<  endl;
+        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_ack << "," << sink->_nacks_sent << "," << (*src_i)->total_dupacks() << "," << (*src_i)->_packets_sent <<  endl;
     }
     flowlog.close();
-    list <ConstantCcaSink*>::iterator sink_i;
+    list <ConstantCcaOSink*>::iterator sink_i;
     for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes" << endl;
-        if ((*sink_i)->cumulative_ack() < 2004000) {
+        cout << (*sink_i)->nodename() << " received " << (*sink_i)->_cumulative_ack << " bytes, " << (*sink_i)->drops() << " drops" << endl;
+        if ((*sink_i)->_cumulative_ack < 2004000) {
             cout << "Incomplete flow " << endl;
-            ConstantCcaSink* sink = (*sink_i);
-            ConstantCcaSrc* counterpart_src = sink->_src;
-            cout << "Src, sent: " << counterpart_src->_highest_dsn_sent << "; last acked " << counterpart_src->highest_dsn_ack() << endl;
+            ConstantCcaOSink* sink = (*sink_i);
+            ConstantCcaOSrc* counterpart_src = sink->_src;
+            if (counterpart_src->_completion_time == 0) {
+                ConstantCcaOSrc test = *counterpart_src;
+                cout << "Src, sent: " << test._highest_sent << "; last acked " << test.last_acked() << endl;
+            }
+            cout << "Src, sent: " << counterpart_src->_highest_sent << "; last acked " << counterpart_src->last_acked() << endl;
         }
     }
     /*
