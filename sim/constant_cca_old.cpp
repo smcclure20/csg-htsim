@@ -1,5 +1,5 @@
 // -*- c-basic-offset: 4; indent-tabs-mode: nil -*- 
-#include "constant_cca.h"
+#include "constant_cca_old.h"
 #include <iostream>
 #include <math.h>
 
@@ -8,14 +8,14 @@
 ////////////////////////////////////////////////////////////////
 
 // TODO NOW: our CCA will not switch modes, so we can get rid of things relevant to that
-ConstantCcaPacer::ConstantCcaPacer(ConstantCcaSubflowSrc& src, EventList& event_list, simtime_picosec interpacket_delay)
+ConstantCcaOPacer::ConstantCcaOPacer(ConstantCcaOSrc& src, EventList& event_list, simtime_picosec interpacket_delay)
     : EventSource(event_list,"constant_cca_pacer"), _src(&src), _interpacket_delay(interpacket_delay) {
     _last_send = eventlist().now();
     _next_send = 0;
 }
 
 void
-ConstantCcaPacer::schedule_send(simtime_picosec delay) {
+ConstantCcaOPacer::schedule_send(simtime_picosec delay) {
     // cout << _src->nodename() << " schedule_send " << timeAsUs(eventlist().now()) << endl;
     // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
@@ -42,7 +42,7 @@ ConstantCcaPacer::schedule_send(simtime_picosec delay) {
 }
 
 bool 
-ConstantCcaPacer::allow_send() {
+ConstantCcaOPacer::allow_send() {
     simtime_picosec now = eventlist().now();
     if (_last_send == 0 && _src->_highest_sent == 0) {
         // first packet, so we can send
@@ -52,7 +52,7 @@ ConstantCcaPacer::allow_send() {
 }
 
 void
-ConstantCcaPacer::cancel() {
+ConstantCcaOPacer::cancel() {
     _interpacket_delay = 0;
     _next_send = 0;
     eventlist().cancelPendingSource(*this);
@@ -61,12 +61,12 @@ ConstantCcaPacer::cancel() {
 // called when we're in window-mode to update the send time so it's always correct if we
 // then go into paced mode
 void
-ConstantCcaPacer::just_sent() {
+ConstantCcaOPacer::just_sent() {
     _last_send = eventlist().now();
 }
 
 void
-ConstantCcaPacer::doNextEvent() {
+ConstantCcaOPacer::doNextEvent() {
     // cout << _src->nodename() << " doNextEvent " << timeAsUs(eventlist().now()) << "(next send is " << timeAsUs(_next_send) << ")" << endl;
     assert(eventlist().now() == _next_send);
     // _src->send_next_packet();
@@ -92,9 +92,10 @@ ConstantCcaPacer::doNextEvent() {
 //  CONSTANT CCA SRC
 ////////////////////////////////////////////////////////////////
 
-ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger* pktlogger, int subflow_id, simtime_picosec pacing_delay)
-    : EventSource(src.eventlist(), "swift_subflow_src"), _flow(pktlogger), _src(src), _pacer(*this, src.eventlist(), pacing_delay)
+ConstantCcaOSrc::ConstantCcaOSrc(ConstantCcaORtxTimerScanner& rtx_scanner, EventList &eventlist, uint32_t addr, simtime_picosec pacing_delay, TrafficLogger* pkt_logger)
+    : EventSource(eventlist, "constant_cca_src"), _pacer(*this, eventlist, pacing_delay), _flow(pkt_logger)
 {
+    _addr = addr;
     _highest_sent = 0;
     _packets_sent = 0;
     _established = false;
@@ -113,27 +114,44 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _rto_count = 0;
     _total_dupacks = 0;
 
+    _fr_disabled = false;
+
+    // cc init
+    _const_cwnd = 100 * mss();  // initial window, in bytes  Note: values in paper are in packets; we're maintaining in bytes.
     _retransmit_cnt = 0;
+    _can_decrease = true;
+    _last_decrease = 0;  // initial value shouldn't matter if _can_decrease is true
     _pacing_delay = pacing_delay;  // 
     _deferred_send = false; // true if we wanted to send, but no scheduler said no.
 
     // PLB init
     _plb_interval = timeFromSec(1);  // disable PLB til we've seen some traffic
     _path_index = 0;  
-    _last_good_path = src.eventlist().now();
-    _plb_threshold_ecn = src._plb_threshold_ecn;
+    _last_good_path = eventlist.now();
     
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
 
     _mss = Packet::data_packet_size();
-    _const_cwnd = 100 * _mss; 
+    _scheduler = NULL;
     _maxcwnd = 0xffffffff;//200*_mss;
+    _flow_size = ((uint64_t)1)<<63;
+    _stop_time = 0;
+    _stopped = false;
+    _app_limited = -1;
+    _completion_time = 0;
 
     _min_cwnd = 10 * _mss;  // guess - if we go less than 10 bytes, we probably get into rounding 
     _max_cwnd = 1000 * _mss;  // maximum cwnd we can use.  Guess - how high should we allow cwnd to go?  Presumably something like B*target_delay?
 
-    _nodename = "constcca_subflowsrc_" + std::to_string(get_id()) + "_" + std::to_string(subflow_id);
+    // PLB init
+    _plb = false; // enable using enable_plb()
+    _spraying = false;
+
+    _rtx_timer_scanner = &rtx_scanner;
+    _rtx_timer_scanner->addSrc(this);
+
+    _nodename = "constcca_src_" + std::to_string(get_id());
 
     _min_rtt = timeFromMs(1000);
 
@@ -146,7 +164,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
 }
 
 void
-ConstantCcaSubflowSrc::update_rtt(simtime_picosec delay) {
+ConstantCcaOSrc::update_rtt(simtime_picosec delay) {
     // calculate TCP-like RTO.  Not clear this is right for Swift
     if (delay!=0){
         if (_rtt>0){
@@ -177,10 +195,13 @@ ConstantCcaSubflowSrc::update_rtt(simtime_picosec delay) {
 }
 
 void
-ConstantCcaSubflowSrc::adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t ackno) {
+ConstantCcaOSrc::adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t ackno) {
     //cout << "adjust_cwnd delay " << timeAsUs(delay) << endl;
+    // swift init
     _prev_cwnd = _const_cwnd;
     simtime_picosec now = eventlist().now(); 
+    _can_decrease = (now - _last_decrease) >= _rtt;  // not clear if we should use smoothed RTT here.
+    //can_decrease = true;
 
     //compute rtt
     update_rtt(delay);
@@ -192,7 +213,7 @@ ConstantCcaSubflowSrc::adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t 
 }
 
 void
-ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
+ConstantCcaOSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
     simtime_picosec now = eventlist().now();
     if (ackno > _last_acked) { // a brand new ack
         _RFC2988_RTO_timeout = now + _rto;// RFC 2988 5.3
@@ -247,7 +268,7 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
         send_packets();
         return;
     }
-    if (_src._fr_disabled) {
+    if (_fr_disabled) {
         // fast recovery disabled
         return;
     }
@@ -266,7 +287,7 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
     // Not yet in fast recovery. What should we do instead?
     _dupacks++;
 
-    if (_dupacks!=_src._dupack_threshold)  { // not yet serious worry
+    if (_dupacks!=_dupack_threshold)  { // not yet serious worry
         send_packets();
         return;
     }
@@ -290,12 +311,12 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
 
 
 int 
-ConstantCcaSubflowSrc::send_packets() {
-    // if (_last_acked >= _src._flow_size && _src._completion_time == 0){ // should this be in receive packet instead?
-    //     _src._completion_time = eventlist().now();
-    //     // _pacer.cancel();
-    //     cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
-    // }
+ConstantCcaOSrc::send_packets() {
+    if (_last_acked >= _flow_size && _completion_time == 0){ // should this be in receive packet instead?
+        _completion_time = eventlist().now();
+        // _pacer.cancel();
+        cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << _last_acked<< endl;
+    }
 
     // if (deferred_retransmit) { // should also check pacer? How else could this be called?
     //     retransmit_packet();
@@ -317,12 +338,12 @@ ConstantCcaSubflowSrc::send_packets() {
     }
     // maybe should just rewrite this. What should the logic be?
     // Only send if the pacer allows it and the window has room
-    uint32_t c = _const_cwnd + _inflate; // TODO: get rid of the cwnd at all
+    uint32_t c = _const_cwnd + _inflate;
     int sent_count = 0;
     // cout << eventlist().now() << " " << nodename() << " cwnd " << _swift_cwnd << " + " << _inflate << endl;
     if (!_established){
         //send SYN packet and wait for SYN/ACK
-        Packet * p  = ConstantCcaPacket::new_syn_pkt(_flow, *(_route), 0, 1, _src._destination, _src._addr, _pathid);
+        Packet * p  = ConstantCcaPacket::new_syn_pkt(_flow, *(_route), 0, 1, _destination, _addr, _pathid);
         _highest_sent = 0;
 
         p->sendOn();
@@ -335,7 +356,43 @@ ConstantCcaSubflowSrc::send_packets() {
         return sent_count;
     }
 
-    while ((_last_acked + c >= _highest_sent + mss()) && (_src.more_data_available() || (_highest_sent < _recoverq) && (_src._highest_dsn_ack < _src._flow_size))) { // this is wrong for multipath
+    if (c < mss()) {
+        // cwnd is too small to send one packet per RTT, so we will be in pacing mode
+        assert(_established);
+        //cout << eventlist().now() << " " << nodename() << " sub-packet cwnd!" << endl;
+
+        // Enter pacing mode if we're not already there. If we are in
+        // pacing mode, we don't reschedule - _pacing_delay will only
+        // be applied for the next packet.  This is intended to mirror
+        // what happens with the carosel, where a sent time is
+        // calculated and then stuck to.  It might make more sense to
+        // reschedule, as we've more recent information, but seems
+        // like this isn't what Google does with hardware pacing.
+        
+        if (!_pacer.is_pending()) {
+            // cout << nodename() << " calling schedule send 2" << endl;
+            _pacer.schedule_send(_pacing_delay);
+            //cout << eventlist().now() << " " << nodename() << " pacer set for " << timeAsUs(_pacing_delay) << "us" << endl;
+
+            // xxx this won't work with app_limited senders.  Fix this
+            // if we want to simulate app limiting with pacing.
+            assert(_app_limited == -1);
+        }
+        return sent_count;
+    }
+    
+    if (_app_limited >= 0 && _rtt > 0) {
+        uint64_t d = (uint64_t)_app_limited * _rtt/1000000000;
+        if (c > d) {
+            c = d;
+        }
+
+        if (c==0){
+            //      _RFC2988_RTO_timeout = timeInf;
+        }
+    }
+
+    while ((_last_acked + c >= _highest_sent + mss()) && (more_data_available() || (_highest_sent < _recoverq) || (_last_acked < _flow_size))) { // this is wrong for multipath
         if (!_pacer.allow_send()) {
             // cout << nodename() << " calling schedule send 3" << endl;
             // _pacer.schedule_send(_pacing_delay);
@@ -358,9 +415,9 @@ ConstantCcaSubflowSrc::send_packets() {
 }
 
 bool
-ConstantCcaSubflowSrc::send_next_packet() {
+ConstantCcaOSrc::send_next_packet() {
     // ask the scheduler if we can send now
-    if (_src.queuesize(_flow.flow_id()) > 2) {
+    if (queuesize(_flow.flow_id()) > 2) {
         // no, we can't send.  We'll be called back when we can.
         _deferred_send = true;
         return false;
@@ -368,29 +425,16 @@ ConstantCcaSubflowSrc::send_next_packet() {
     _deferred_send = false;
 
     uint64_t seqno;
-    if (_src.more_data_available()) { // todo: clean this up
+    if (more_data_available()) { // todo: clean this up
         seqno = _highest_sent + 1;
-    } else if ((_highest_sent < _recoverq) && (_src._highest_dsn_ack < _src._flow_size)) {
+    } else if ((_highest_sent < _recoverq) && (_last_acked < _flow_size)) {
         seqno = _highest_sent + 1;
     } else {
         // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
         return false;
     }
 
-    ConstantCcaPacket::seq_t dsn;
-    if (!_dsn_map.empty() && _dsn_map.count(_highest_sent + 1) > 0) {
-        dsn = _dsn_map[_highest_sent+1];
-        if (dsn == 0) {
-            cout << "highest_sent " << _highest_sent << " last_acked " << _last_acked << " ,highest in map: " << (uint64_t) prev(_dsn_map.end())->first << endl;
-            assert(false);
-        }
-    } else {
-        dsn = _src._highest_dsn_sent+1;
-        _dsn_map[_highest_sent+1] = dsn;
-        _src._highest_dsn_sent += mss();
-    }
-
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, dsn, mss(), _src._destination, _src._addr, _pathid);
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, 0,mss(), _destination, _addr, _pathid);
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " sent " << _highest_sent+1 << "-" << _highest_sent+mss() << endl;
     _highest_sent += mss();  
     _packets_sent++;
@@ -400,7 +444,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
     p->sendOn();
     _pacer.just_sent();
 
-    if (_src.spraying()) { // switch path on every packet
+    if (spraying()) { // switch path on every packet
         move_path_flow_label();
     }
 
@@ -408,7 +452,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
 }
 
 void
-ConstantCcaSubflowSrc::send_callback() {
+ConstantCcaOSrc::send_callback() {
     if (_deferred_send == false) {
         // no need to be here
         return;
@@ -420,17 +464,17 @@ ConstantCcaSubflowSrc::send_callback() {
 }
 
 void 
-ConstantCcaSubflowSrc::retransmit_packet() {
+ConstantCcaOSrc::retransmit_packet() {
     if (!_established){
         assert(_highest_sent == 1);
 
-        Packet* p  = ConstantCcaPacket::new_syn_pkt(_flow, *_route, 1, 1, _src._destination, _src._addr, _pathid);
+        Packet* p  = ConstantCcaPacket::new_syn_pkt(_flow, *_route, 1, 1, _destination, _addr, _pathid);
         p->sendOn();
 
         cout << "Resending SYN, waiting for SYN/ACK" << endl;
         return;        
     }
-    if (_last_acked >= _src._flow_size) {
+    if (_last_acked >= _flow_size) {
         return;
     }
     // if (!_pacer.allow_send()) {
@@ -439,8 +483,7 @@ ConstantCcaSubflowSrc::retransmit_packet() {
     // }
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     // cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
-    ConstantCcaPacket::seq_t dsn = _dsn_map[_last_acked+1];
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid);
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, 0,mss(), _destination, _addr, _pathid);
 
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -454,7 +497,7 @@ ConstantCcaSubflowSrc::retransmit_packet() {
 }
 
 void 
-ConstantCcaSubflowSrc::retransmit_packet(uint64_t seqno) {
+ConstantCcaOSrc::retransmit_packet(uint64_t seqno) {
     // if (_repeated_nack_rtxs > 1 ) {
     //     _pacer.cancel();
     //     _nack_backoff = _nack_backoff * 2;
@@ -470,8 +513,7 @@ ConstantCcaSubflowSrc::retransmit_packet(uint64_t seqno) {
         return;
     }
     _repeated_nack_rtxs++;
-    ConstantCcaPacket::seq_t dsn = _dsn_map[seqno];
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, dsn, mss(), _src._destination, _src._addr, _pathid);
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, 0,mss(), _destination, _addr, _pathid);
 
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -488,7 +530,7 @@ ConstantCcaSubflowSrc::retransmit_packet(uint64_t seqno) {
 }
 
 void
-ConstantCcaSubflowSrc::receivePacket(Packet& pkt) 
+ConstantCcaOSrc::receivePacket(Packet& pkt) 
 {
     if (pkt.header_only()) {
         ConstantCcaPacket* dp = (ConstantCcaPacket*)(&pkt);
@@ -504,7 +546,6 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     simtime_picosec ts_echo;
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     ConstantCcaAck::seq_t ackno = p->ackno();
-    ConstantCcaAck::seq_t ds_ackno = p->ds_ackno();
     // _acks_received.push_back(ackno);
 
     if (p->is_nack()) {
@@ -544,7 +585,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     adjust_cwnd(delay, ackno);
 
 
-    if (_src.plb()) {
+    if (plb()) {
         simtime_picosec now = eventlist().now();
         _ecn_marks.emplace_back(pkt.flags() & ECN_CE);
         if (_ecn_marks.size() > 10) {
@@ -574,13 +615,11 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         }
     }
 
-    _src.update_dsn_ack(ds_ackno);
-
     handle_ack(ackno);
 }
 
 void
-ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec period) {
+ConstantCcaOSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec period) {
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " rtx_timer_hook" << endl;
     if (now <= _RFC2988_RTO_timeout || _RFC2988_RTO_timeout==timeInf) 
         return;
@@ -588,7 +627,7 @@ ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec perio
     if (_highest_sent == 0) 
         return;
 
-    if (_src._highest_dsn_ack >= _src._flow_size) 
+    if (_last_acked >= _flow_size) 
         return;
 
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " At " << now/(double)1000000000<< " RTO " << _rto/1000000000 << " MDEV " 
@@ -626,13 +665,13 @@ ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec perio
     }
 }
 
-void ConstantCcaSubflowSrc::doNextEvent() {
+void ConstantCcaOSrc::doNextEvent() {
     if (!_established) {
         //cout << "Establishing connection" << endl;
-        _src.startflow();
+        startflow();
         return;
     }
-    if(_src._highest_dsn_ack >= _src._flow_size) {
+    if(_last_acked >= _flow_size) {
         _RFC2988_RTO_timeout = timeInf;
         return;
     }
@@ -661,116 +700,61 @@ void ConstantCcaSubflowSrc::doNextEvent() {
 }
 
 void 
-ConstantCcaSubflowSrc::connect(ConstantCcaSink& sink, const Route& routeout, const Route& routein, ConstBaseScheduler* scheduler) {
-    _subflow_sink = sink.connect(_src, *this, routein);
+ConstantCcaOSrc::connect(ConstantCcaOSink& sink, simtime_picosec startTime, uint32_t destination, const Route& routeout, const Route& routein) {
+    _sink = &sink;
+    _destination = destination;
     Route* new_route = routeout.clone(); // make a copy, as we may be switching routes and don't want to append the sink more than once
-    new_route->push_back(_subflow_sink);
+    new_route->push_back(_sink);
     _route = new_route;
     _flow.set_id(get_id()); // identify the packet flow with the source that generated it
     cout << "connect, flow id is now " << _flow.get_id() << endl;
     // cout << "connect, flow id (flow_id()) is now " << _flow.flow_id() << endl;
-    assert(scheduler);
-    scheduler->add_src(_flow.flow_id(), this);
+    _scheduler = dynamic_cast<ConstBaseScheduler*>(routeout.at(0));
+    _scheduler->add_src(_flow.flow_id(), this);
+    _sink->connect(*this, routein);
+    eventlist().sourceIsPending(*this,startTime);
+    _start_time = startTime;
 }
 
 void
-ConstantCcaSubflowSrc::move_path_flow_label() {
+ConstantCcaOSrc::move_path_flow_label() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
 }
 
 void
-ConstantCcaSubflowSrc::move_path(bool permit_cycles) {
+ConstantCcaOSrc::move_path(bool permit_cycles) {
     cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
-    if (_src._paths.size() == 0) {
+    if (_paths.size() == 0) {
         cout << nodename() << " cant move_path\n";
         return;
     }
     _path_index++;
     if (!permit_cycles) {
         // if we've moved paths so often we've run out of paths, I want to know
-        assert(_path_index < _src._paths.size()); 
-    } else if (_path_index >= _src._paths.size()) {
-        _path_index = _path_index % _src._paths.size();
+        assert(_path_index < _paths.size()); 
+    } else if (_path_index >= _paths.size()) {
+        _path_index = _path_index % _paths.size();
     }
-    Route* new_route = _src._paths[_path_index]->clone();
-    new_route->push_back(_subflow_sink);
+    Route* new_route = _paths[_path_index]->clone();
+    new_route->push_back(_sink);
     _route = new_route;
 }
 
 void
-ConstantCcaSubflowSrc::reroute(const Route &routeout) {
+ConstantCcaOSrc::reroute(const Route &routeout) {
     Route* new_route = routeout.clone();
-    new_route->push_back(_subflow_sink);
+    new_route->push_back(_sink);
     _route = new_route;
 }
 
-////////////////////////////////////////////////////////////////
-//  CONSTANT CCA SRC
-////////////////////////////////////////////////////////////////
-
-ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventList &eventlist, uint32_t addr, simtime_picosec pacing_delay, TrafficLogger* pkt_logger)
-    : EventSource(eventlist,"constcca"),  _traffic_logger(pkt_logger), _rtx_timer_scanner(&rtx_scanner)
-{
-    _mss = Packet::data_packet_size();
-    _scheduler = NULL;
-    _flow_size = ((uint64_t)1)<<63;
-    _stop_time = 0;
-    _stopped = false;
-    _highest_dsn_sent = 0;
-    _completion_time = 0;
-    _highest_dsn_ack = 0;
-    _start_time = 0;
-    // PLB init
-    _plb = false; // enable using enable_plb()
-    _spraying = false;
-    _fr_disabled = false;
-
-    _addr = addr;
-    _pacing_delay = pacing_delay;
-}
-
-void 
-ConstantCcaSrc::connect(ConstantCcaSink& sink, simtime_picosec starttime, uint32_t no_of_subflows, uint32_t destination, const Route& routeout, const Route& routein) {
-    _destination = destination;
-    _sink=&sink;
-    // Route* new_route = routeout.clone(); // make a copy, as we may be switching routes and don't want to append the sink more than once
-    // new_route->push_back(_sink);
-    _scheduler = dynamic_cast<ConstBaseScheduler*>(routeout.at(0));
-    for (uint32_t i = 0; i < no_of_subflows; i++) {
-        ConstantCcaSubflowSrc* subflow = new ConstantCcaSubflowSrc(*this, _traffic_logger, _subs.size(), _pacing_delay * no_of_subflows);
-        _subs.push_back(subflow);
-        // assert(_paths.size() > 0);
-        // if (_paths.size() < no_of_subflows) {
-        //     cout << "More subflows requested than paths available - there will be duplicates\n";
-        // }
-        // const Route* routeout = _paths[i%_paths.size()];
-        // const Route* routeback = _paths[i%_paths.size()]->reverse();
-        // assert(routeback);
-        subflow->connect(sink, routeout, routein, _scheduler);
-        _rtx_timer_scanner->registerSubflow(subflow);
-    }
-    _start_time = starttime;
-    eventlist().sourceIsPending(*this,starttime);
-    // cout << "starttime " << timeAsUs(starttime) << endl;
-}
-
-void ConstantCcaSrc::update_dsn_ack(ConstantCcaAck::seq_t ds_ackno) {
-    //cout << "Flow " << _name << " dsn ack " << ds_ackno << endl;
-    _highest_dsn_ack = max(_highest_dsn_ack, ds_ackno);
-    if (ds_ackno >= _flow_size && _completion_time == 0){
-        _completion_time = eventlist().now();
-        cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
-    }
-}
-
 int
-ConstantCcaSrc::queuesize(uint32_t flow_id) {
+ConstantCcaOSrc::queuesize(uint32_t flow_id) {
     return _scheduler->src_queuesize(flow_id);
 }
 
 bool
-ConstantCcaSrc::check_stoptime() {
+ConstantCcaOSrc::check_stoptime() {
     if (_stop_time && eventlist().now() >= _stop_time) {
         _stopped = true;
         _stop_time = 0;
@@ -781,15 +765,21 @@ ConstantCcaSrc::check_stoptime() {
     return false;
 }
 
-void
-ConstantCcaSrc::set_cwnd(uint32_t cwnd) {
-    for (size_t i = 0; i < _subs.size(); i++) {
-        _subs[i]->_const_cwnd = cwnd;
+void ConstantCcaOSrc::set_app_limit(int pktps) {
+    if (_app_limited==0 && pktps){
+        _const_cwnd = _mss;
     }
+    _app_limited = pktps;
+    send_packets();
 }
 
 void
-ConstantCcaSrc::set_paths(vector<const Route*>* rt_list){
+ConstantCcaOSrc::set_cwnd(uint32_t cwnd) {
+    _const_cwnd = cwnd;
+}
+
+void
+ConstantCcaOSrc::set_paths(vector<const Route*>* rt_list){
     size_t no_of_paths = rt_list->size();
     _paths.resize(no_of_paths);
     for (size_t i=0; i < no_of_paths; i++){
@@ -804,15 +794,12 @@ ConstantCcaSrc::set_paths(vector<const Route*>* rt_list){
         rt_tmp->set_path_id(i, rt_list->size());
         _paths[i] = rt_tmp;
     }
-    // permute_paths();
-    for (size_t i = 0; i < _subs.size(); i++) {
-        _subs[i]->_path_index = 0;
-        _subs[i]->reroute(*_paths[i]);
-    }
+    permute_paths();
+    _path_index = 0;
 }
 
 void
-ConstantCcaSrc::permute_paths() {
+ConstantCcaOSrc::permute_paths() {
     // Fisher-Yates shuffle
     size_t len = _paths.size();
     for (size_t i = 0; i < len; i++) {
@@ -824,151 +811,38 @@ ConstantCcaSrc::permute_paths() {
 }
 
 void 
-ConstantCcaSrc::startflow() {
-    for (size_t i = 0; i < _subs.size(); i++) {
-        if (_subs[i]->_established)
-            continue; // don't start twice
-        _subs[i]->_established = true; // send data from the start
-        //cout << eventlist().now() << " " << _subs[i]->nodename() << " (sub" << i << ") started, cwnd " << _subs[i]->_swift_cwnd << endl;
-        _subs[i]->send_packets();
-        _subs[i]->_pacer.schedule_send(_subs[i]->_pacing_delay); // todo: should probably deliberately offset the subflows
-    }
+ConstantCcaOSrc::startflow() {
+    _established = true; // send data from the start
+    send_packets();
+    _pacer.schedule_send(_pacing_delay);
 }
 
-bool ConstantCcaSrc::more_data_available() const {
+bool ConstantCcaOSrc::more_data_available() const {
     if (_stop_time && eventlist().now() >= _stop_time) {
         return false;
     }
-    return _highest_dsn_sent + mss() <= _flow_size;
+    return _highest_sent + mss() <= _flow_size;
 }
 
-void ConstantCcaSrc::doNextEvent() {
-    // cout << "Starting flow" << endl;
-    startflow();
-}
-
-uint32_t 
-ConstantCcaSrc::drops() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->drops();
-    }
-    return total;
-}
-
-uint32_t 
-ConstantCcaSrc::rtos() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->rtos();
-    }
-    return total;
-}
-
-uint32_t 
-ConstantCcaSrc::total_dupacks() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->total_dupacks();
-    }
-    return total;
-}
-
-uint32_t
-ConstantCcaSrc::packets_sent() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->packets_sent();
-    }
-    return total;
-}
 
 ////////////////////////////////////////////////////////////////
-// SINK
+//  SINK
 ////////////////////////////////////////////////////////////////
 
-ConstantCcaSink::ConstantCcaSink() 
-    : DataReceiver("ConstantCcaSink"), _cumulative_data_ack(0), _buffer_logger(NULL)
-{
-    _src = NULL;
-    _nodename = "constantccasink";
-}
-
-ConstantCcaSubflowSink*
-ConstantCcaSink::connect(ConstantCcaSrc& src, ConstantCcaSubflowSrc& subflow_src, const Route& route_back) {
-    _src = &src;
-    ConstantCcaSubflowSink* subflow_sink = new ConstantCcaSubflowSink(*this);
-    _subs.push_back(subflow_sink);
-    subflow_sink->connect(subflow_src, route_back);
-    return subflow_sink;
-}
-
-void
-ConstantCcaSink::receivePacket(Packet& pkt) {
-    ConstantCcaPacket *p = (ConstantCcaPacket*)(&pkt);
-    ConstantCcaPacket::seq_t dsn = p->dsn();
-    int size = p->size(); // TODO: the following code assumes all packets are the same size
-    //cout << "ConstantCcaSink received dsn " << dsn << endl;
-    if (dsn == _cumulative_data_ack+1) {
-        _cumulative_data_ack = dsn + size - 1;
-        while (!_dsn_received.empty() && (*(_dsn_received.begin()) == _cumulative_data_ack+1) ) {
-            _dsn_received.erase(_dsn_received.begin());
-            _cumulative_data_ack+= size;
-        }
-    } else if (dsn < _cumulative_data_ack+1) {
-        // cout << "Dup DSN received!\n";
-    } else {
-        // hole in sequence space
-        _dsn_received.insert(dsn);
-    }
-}
-
-uint32_t 
-ConstantCcaSink::drops() {
-    uint32_t total;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->drops();
-    }
-    return total;
-}
-
-uint32_t 
-ConstantCcaSink::spurious_retransmits() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->spurious_retransmits();
-    }
-    return total;
-}
-
-uint32_t 
-ConstantCcaSink::nacks_sent() {
-    uint32_t total = 0;
-    for (int i = 0; i < (int)_subs.size(); i++) {
-        total += _subs[i]->nacks_sent();
-    }
-    return total;
-}
-
-////////////////////////////////////////////////////////////////
-//  SUBFLOW SINK
-////////////////////////////////////////////////////////////////
-
-ConstantCcaSubflowSink::ConstantCcaSubflowSink(ConstantCcaSink& sink) 
-    : DataReceiver("ConstantCcaSubflowSink"), _sink(sink)
+ConstantCcaOSink::ConstantCcaOSink() 
+    : DataReceiver("ConstantCcaOSink")
 {
     _cumulative_ack = 0;
     _packets = 0;
     _spurious_retransmits = 0;
-    _drops = 0;
     _nacks_sent = 0;
-    _subflow_src = NULL;
-    _nodename = "constantccasubflowsink";
+    _src = NULL;
+    _nodename = "constantccasink";
 }
 
 void
-ConstantCcaSubflowSink::connect(ConstantCcaSubflowSrc& src, const Route& route) {
-    _subflow_src = &src;
+ConstantCcaOSink::connect(ConstantCcaOSrc& src, const Route& route) {
+    _src = &src;
     Route *rt = route.clone();
     rt->push_back(&src);
     _route = rt;
@@ -977,7 +851,7 @@ ConstantCcaSubflowSink::connect(ConstantCcaSubflowSrc& src, const Route& route) 
 }
 
 void
-ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
+ConstantCcaOSink::receivePacket(Packet& pkt) {
     ConstantCcaPacket *p = (ConstantCcaPacket*)(&pkt);
     if (p->is_header()) {
         // Do not update anything, just reply to the sender
@@ -985,11 +859,10 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
         uint32_t dst = p->dst();
         uint32_t pathid = p->pathid();
         uint64_t seqno = p->seqno();
-        uint64_t dsn = p->dsn();
         simtime_picosec ts = p->ts();
         p->free();
         // cout << "Sending NACK for packet " << seqno << " to " << _src->nodename() << endl;
-        send_nack(ts, src, dst, pathid, seqno, dsn);
+        send_nack(ts, src, dst, pathid, seqno);
         return;
     }
     int size = p->size(); // TODO: the following code assumes all packets are the same size
@@ -1013,8 +886,6 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
         _received.insert(seqno);
     }
 
-    _sink.receivePacket(pkt);
-
     uint32_t src = p->src();
     uint32_t dst = p->dst();
     uint32_t pathid = p->pathid();
@@ -1026,41 +897,45 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
 }
 
 void 
-ConstantCcaSubflowSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid) {
+ConstantCcaOSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid) {
     const Route* rt = _route;
-    ConstantCcaAck *ack = ConstantCcaAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src, pathid);
+    ConstantCcaAck *ack = ConstantCcaAck::newpkt(_src->flow(), *rt, 0, _cumulative_ack, 0, ts, ack_dst, ack_src, pathid);
 
     ack->sendOn();
 }
 
 void 
-ConstantCcaSubflowSink::send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno, uint64_t dsn) {
+ConstantCcaOSink::send_nack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid, uint64_t seqno) {
     const Route* rt = _route;
-    ConstantCcaAck *nack = ConstantCcaAck::newnack(_subflow_src->flow(), *rt, 0, seqno, dsn, ts, ack_dst, ack_src, pathid);
+    ConstantCcaAck *nack = ConstantCcaAck::newnack(_src->flow(), *rt, 0, seqno, 0, ts, ack_dst, ack_src, pathid);
 
     nack->sendOn();
     _nacks_sent++;
+}
+ 
+uint64_t
+ConstantCcaOSink::cumulative_ack() {
+    // this is needed by some loggers.  If we ever need it, figure out what it should really return
+    return _cumulative_ack;
+} 
+
+uint32_t ConstantCcaOSink::spurious_retransmits() {
+    return _spurious_retransmits;
 }
 
 ////////////////////////////////////////////////////////////////
 //  RETRANSMISSION TIMER
 ////////////////////////////////////////////////////////////////
 
-ConstantCcaRtxTimerScanner::ConstantCcaRtxTimerScanner(simtime_picosec scanPeriod, EventList& eventlist)
+ConstantCcaORtxTimerScanner::ConstantCcaORtxTimerScanner(simtime_picosec scanPeriod, EventList& eventlist)
     : EventSource(eventlist,"RtxScanner"), _scanPeriod(scanPeriod){
     eventlist.sourceIsPendingRel(*this, _scanPeriod);
 }
 
-void 
-ConstantCcaRtxTimerScanner::registerSubflow(ConstantCcaSubflowSrc* subflow_src) {
-    _srcs.push_back(subflow_src);
-}
-
-
-void ConstantCcaRtxTimerScanner::doNextEvent() {
+void ConstantCcaORtxTimerScanner::doNextEvent() {
     simtime_picosec now = eventlist().now();
     for (auto it = _srcs.begin(); it != _srcs.end(); it++) {
-        ConstantCcaSubflowSrc* src = *it;
+        ConstantCcaOSrc* src = *it;
         src->rtx_timer_hook(now, _scanPeriod);
     }
     eventlist().sourceIsPendingRel(*this, _scanPeriod);
