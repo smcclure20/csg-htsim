@@ -75,6 +75,12 @@ RoceSrc::RoceSrc(RoceLogger* logger, TrafficLogger* pktlogger, EventList &eventl
     _state_send = READY;
     _time_last_sent = 0;
     _packet_spacing = (simtime_picosec)((Packet::data_packet_size()+RocePacket::ACKSIZE) * (pow(10.0,12.0) * 8) / _bitrate);
+
+    bool _plb = false;
+    uint16_t _plb_threshold_ecn = 0;
+    simtime_picosec _plb_interval = timeFromMs(10);
+    simtime_picosec _last_good_path = 0;
+    bool _spraying = false;
 }
 
 /*mem_b RoceSrc::queuesize(){
@@ -109,8 +115,12 @@ void RoceSrc::startflow(){
     _acked_packets = 0;
     _packets_sent = 0;
     _done = false;
+
+    _start_time = eventlist().now();
+    _completion_time = 0;
     
-    eventlist().sourceIsPendingRel(*this,0);
+    // eventlist().sourceIsPendingRel(*this,0);
+    eventlist().sourceIsPendingRel(*this, _packet_spacing + rand()%(_packet_spacing/10));
 }
 
 void RoceSrc::set_end_trigger(Trigger& end_trigger) {
@@ -127,8 +137,8 @@ void RoceSrc::connect(Route* routeout, Route* routeback, RoceSink& sink, simtime
     _sink->connect(*this, routeback);
 
     if (starttime != TRIGGER_START) {
-        //eventlist().sourceIsPending(*this,starttime);
-        startflow();
+        eventlist().sourceIsPending(*this,starttime);
+        // startflow();
     }
     //else cout << "TRIGGER START " << _nodename << endl; 
 }
@@ -195,7 +205,7 @@ void RoceSrc::processAck(const RoceAck& ack) {
         // due course.
         _last_acked = ackno;
     }
-    if (_logger) _logger->logRoce(*this, RoceLogger::ROCE_RCV);
+    // if (_logger) _logger->logRoce(*this, RoceLogger::ROCE_RCV);
 
     if (_log_me)
         cout << "Src " << get_id() << " ackno " << ackno << endl;
@@ -205,6 +215,7 @@ void RoceSrc::processAck(const RoceAck& ack) {
         if (_end_trigger) {
             _end_trigger->activate();
         }
+        _completion_time = eventlist().now();
 
         return;
     }
@@ -216,6 +227,7 @@ void RoceSrc::processPause(const EthPausePacket& p) {
         //cout << "Source " << str() << " PAUSE " << timeAsUs(eventlist().now()) << endl;
         //assert(_state_send != PAUSED);
         _state_send = PAUSED;
+        _pauses++;
     } else {
         //we are allowed to send!
         //assert(_state_send != READY);
@@ -255,6 +267,29 @@ void RoceSrc::receivePacket(Packet& pkt)
         _acks_received++;
         processAck((const RoceAck&)pkt);
         pkt.free();
+        if (plb()) {
+            simtime_picosec now = eventlist().now();
+            _ecn_marks.emplace_back(pkt.flags() & ECN_CE);
+            if (_ecn_marks.size() > 10) {
+                _ecn_marks.pop_front();
+            }
+            int total_marks = 0;
+            for (auto& m : _ecn_marks) {
+                total_marks += m;
+            }
+            if (total_marks < _plb_threshold_ecn) {
+                // not enough marks to be a problem
+                _last_good_path = now;
+                _plb_interval = random()%(2*_rtt) + 5*_rtt;
+            }
+
+            // PLB (simple version)
+            if (now - _last_good_path > _plb_interval) {
+                cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
+                _last_good_path = now;
+                _pathid ++;
+            }
+        }
         return;
     default:
         abort();
@@ -288,6 +323,10 @@ void RoceSrc::send_packet() {
     assert(p);
     p->set_pathid(_pathid);
 
+    if (spraying()) {
+        _pathid++;
+    }
+
     p->flow().logTraffic(*p,*this,TrafficLogger::PKT_CREATESEND);
     p->set_ts(eventlist().now());
     
@@ -303,10 +342,10 @@ void RoceSrc::send_packet() {
 }
 
 void RoceSrc::doNextEvent() {
-    /*if (!_flow_started){
+    if (!_flow_started){
       startflow();
       return;
-      }*/
+      }
 
     assert(_flow_started);
     if (_log_me) 
@@ -330,7 +369,7 @@ void RoceSrc::doNextEvent() {
         _time_last_sent = eventlist().now();
     }
 
-    simtime_picosec next_send = _time_last_sent + _packet_spacing;
+    simtime_picosec next_send = _time_last_sent + _packet_spacing + rand()%(_packet_spacing/10);
     assert(next_send > eventlist().now());
 
     eventlist().sourceIsPending(*this, next_send);
@@ -403,6 +442,7 @@ void RoceSink::receivePacket(Packet& pkt) {
     //bool last_packet = ((RocePacket*)&pkt)->last_packet();
 
     if (seqno > _cumulative_ack+1){
+        _drops++;
         send_nack(ts,_cumulative_ack);  
         pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_RCVDESTROY);
 
