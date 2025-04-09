@@ -122,6 +122,7 @@ public:
 
     static void set_strategy(routing_strategy s) { assert (_strategy==NIX); _strategy = s; }
     static void set_ar_fraction(uint16_t f) { assert(f>=1);_ar_fraction = f;} 
+    static void set_ar_sticky(uint16_t v) { _ar_sticky = v;} 
 
     static routing_strategy _strategy;
     static uint16_t _ar_fraction;
