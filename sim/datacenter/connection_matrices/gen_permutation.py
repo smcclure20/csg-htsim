@@ -14,7 +14,7 @@ import sys
 from random import seed, shuffle
 #print(sys.argv)
 if len(sys.argv) != 7:
-    print("Usage: python gen_pemutation.py <filename> <nodes> <conns> <flowsize> <extrastarttime> <randseed>")
+    print("Usage: python3 gen_permutation.py <filename> <nodes> <conns> <flowsize> <extrastarttime> <randseed>")
     sys.exit()
 filename = sys.argv[1]
 nodes = int(sys.argv[2])
@@ -38,9 +38,9 @@ if randseed != 0:
 
 all_srcs = []
 all_dsts = []
-srcs = []
-dsts = []
 for c in range(int(conns/nodes)):
+    srcs = []
+    dsts = []
     for n in range(nodes):
         srcs.append(n)
         dsts.append(n)
@@ -62,6 +62,9 @@ for c in range(int(conns/nodes)):
             tmp = all_dsts[n+ nodes*c]
             all_dsts[n+ nodes*c] = all_dsts[i+ nodes*c]
             all_dsts[i+ nodes*c] = tmp
+            if all_srcs[n + nodes*c] == all_dsts[n + nodes*c]:
+                print("Error: still found a self-loop after swapping! This should not happen.")
+                sys.exit(1)
 
 #print(dsts)
 
