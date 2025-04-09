@@ -10,6 +10,7 @@
 
 #include <list>
 #include <map>
+#include <deque>
 //#include "util.h"
 #include "math.h"
 #include "config.h"
@@ -19,6 +20,7 @@
 #include "eventlist.h"
 #include "eth_pause_packet.h"
 #include "trigger.h"
+#include "ecn.h"
 
 #define timeInf 0
 
@@ -75,6 +77,21 @@ public:
     virtual mem_b queuesize() const { return 0;};
     virtual mem_b maxsize() const { return 0;}; 
 
+    //  PLB
+    void enable_plb() {_plb = true;};
+    bool _plb = false;
+    inline bool plb() const {return _plb;}
+    uint16_t _plb_threshold_ecn = 0;
+    simtime_picosec _plb_interval = timeFromMs(10);
+    void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
+    simtime_picosec _last_good_path = 0;
+    std::deque<bool> _ecn_marks;
+
+    // packet switching
+    bool _spraying = false;
+    void set_spraying() {_spraying = true;}
+    inline bool spraying() const {return _spraying;}
+
     // should really be private, but loggers want to see:
     uint64_t _highest_sent;  //seqno is in bytes
     uint64_t _packets_sent;
@@ -83,6 +100,10 @@ public:
     uint32_t _rtx_packets_sent;
     uint32_t _acks_received;
     uint32_t _nacks_received;
+    uint32_t _pauses;
+
+    simtime_picosec _completion_time;
+    simtime_picosec _start_time;
 
     uint32_t _acked_packets;
     uint32_t _pathid;
@@ -119,6 +140,8 @@ public:
     static simtime_picosec _min_rto;
 
     PacketFlow _flow;
+    uint64_t _flow_size;  //The flow size in bytes.  Stop sending after this amount.
+    simtime_picosec _packet_spacing;
 
 private:
     // Housekeeping
@@ -134,9 +157,7 @@ private:
     // Mechanism
     void clear_timer(uint64_t start,uint64_t end);
 
-    uint64_t _flow_size;  //The flow size in bytes.  Stop sending after this amount.
     simtime_picosec _stop_time;
-    simtime_picosec _packet_spacing;
     simtime_picosec _time_last_sent;
     bool _done;
 };
