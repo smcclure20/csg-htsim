@@ -172,8 +172,12 @@ int main(int argc, char **argv) {
             if (!strcmp(argv[i+1], "ecmp")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
                 route_strategy = ECMP;
-            } else if (!strcmp(argv[i+1], "ar")) {
+            } else if (!strcmp(argv[i+1], "pkt_ar")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                route_strategy = ADAPTIVE_ROUTING;
+            } else if (!strcmp(argv[i+1], "fl_ar")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                FatTreeSwitch::set_ar_sticky(FatTreeSwitch::PER_FLOWLET);
                 route_strategy = ADAPTIVE_ROUTING;
             } else if (!strcmp(argv[i+1], "ecmp_ar")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP_ADAPTIVE);
@@ -197,7 +201,7 @@ int main(int argc, char **argv) {
     eventlist.setEndtime(endtime);
 
     queuesize = queuesize*Packet::data_packet_size();
-    srand(13);
+    srand(time(NULL));
       
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
@@ -336,6 +340,13 @@ int main(int argc, char **argv) {
             vector<const Route*>* paths = top->get_paths(dest,src);
             net_paths[dest][src] = paths;
         }
+        // TODO: set the number of subflows here (if -subflows == 0) such that the rate  is low enough for a certain dupack threshold
+        if (no_of_subflows == 0) {
+            int needed_competing_flows = ceil((6 * 8) / dupack_thresh); // 6q/f 
+            int flows_per_link = int((double)all_conns->size() / no_of_nodes);
+            no_of_subflows = std::max(1, (int)((needed_competing_flows)/flows_per_link));
+
+        }
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
         simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
@@ -356,7 +367,7 @@ int main(int argc, char **argv) {
             sender->set_spraying();
         }
         if (dupack_thresh != 3) {
-            int k = (4*no_of_nodes )^ (1/3);
+            // int k = (4*no_of_nodes )^ (1/3);
             // if (src % (k/2) ==  dst % (k/2)) { // TODO: make this depend on how many hops away the two are
             //     sender->set_dupack_thresh();
             // } else {
