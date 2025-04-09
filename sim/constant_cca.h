@@ -185,6 +185,7 @@ public:
 
     uint64_t _highest_sent;  //seqno is in bytes
     uint64_t _packets_sent;
+    uint64_t _highest_sent_abs;
 
     int send_packets();
 

@@ -98,6 +98,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _highest_sent = 0;
     _packets_sent = 0;
     _established = false;
+    _highest_sent_abs = 0;
 
     _last_acked = 0;
     _dupacks = 0;
@@ -118,7 +119,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _deferred_send = false; // true if we wanted to send, but no scheduler said no.
 
     // PLB init
-    _plb_interval = timeFromSec(1);  // disable PLB til we've seen some traffic
+    _plb_interval = timeFromMs(10);  // disable PLB til we've seen some traffic
     _path_index = 0;  
     _last_good_path = src.eventlist().now();
     _plb_threshold_ecn = src._plb_threshold_ecn;
@@ -276,6 +277,11 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
            etc. don't do fast recovery */
         return;
     }
+
+    if (_last_acked == _highest_sent) { 
+        // We have gotten the dupacks because we haven't sent anything else (in pacing mode)
+        return;
+    }
   
     // begin fast recovery
   
@@ -335,7 +341,7 @@ ConstantCcaSubflowSrc::send_packets() {
         return sent_count;
     }
 
-    while ((_last_acked + c >= _highest_sent + mss()) && (_src.more_data_available() || (_highest_sent < _recoverq) && (_src._highest_dsn_ack < _src._flow_size))) { // this is wrong for multipath
+    while ((_last_acked + c >= _highest_sent + mss()) && (_src.more_data_available() || ((_highest_sent <= _highest_sent_abs)))) {
         if (!_pacer.allow_send()) {
             // cout << nodename() << " calling schedule send 3" << endl;
             // _pacer.schedule_send(_pacing_delay);
@@ -370,7 +376,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
     uint64_t seqno;
     if (_src.more_data_available()) { // todo: clean this up
         seqno = _highest_sent + 1;
-    } else if ((_highest_sent < _recoverq) && (_src._highest_dsn_ack < _src._flow_size)) {
+    } else if ((_highest_sent < _recoverq) ) { //((_highest_sent <= _recoverq) && (_src._highest_dsn_ack < _src._flow_size)) {
         seqno = _highest_sent + 1;
     } else {
         // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
@@ -388,6 +394,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
         dsn = _src._highest_dsn_sent+1;
         _dsn_map[_highest_sent+1] = dsn;
         _src._highest_dsn_sent += mss();
+        _highest_sent_abs = _highest_sent; // it can be possible for neither hsent or recoverq to be the actual highest sent (multiple losses before recovering), so we need this
     }
 
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, dsn, mss(), _src._destination, _src._addr, _pathid);
@@ -395,7 +402,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
     _highest_sent += mss();  
     _packets_sent++;
     _repeated_nack_rtxs = 0;
-    
+
     p->set_ts(eventlist().now());
     p->sendOn();
     _pacer.just_sent();
@@ -760,6 +767,9 @@ void ConstantCcaSrc::update_dsn_ack(ConstantCcaAck::seq_t ds_ackno) {
     _highest_dsn_ack = max(_highest_dsn_ack, ds_ackno);
     if (ds_ackno >= _flow_size && _completion_time == 0){
         _completion_time = eventlist().now();
+        for (size_t i = 0; i < _subs.size(); i++) {
+            _subs[i]->_pacer.cancel();
+        }
         cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
     }
 }
@@ -839,7 +849,7 @@ bool ConstantCcaSrc::more_data_available() const {
     if (_stop_time && eventlist().now() >= _stop_time) {
         return false;
     }
-    return _highest_dsn_sent + mss() <= _flow_size;
+    return _highest_dsn_sent < _flow_size;
 }
 
 void ConstantCcaSrc::doNextEvent() {
