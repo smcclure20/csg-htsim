@@ -114,6 +114,31 @@ BaseQueue::quantized_queuesize(){
     return _last_qs;
 }
 
+bool 
+BaseQueue::checkBurstyLoss() {
+    // enter existing burst of loss or start a new one
+    if (_bursty_loss && (_next_burst_arrival <= eventlist().now() || _in_burst)) {
+        if (!_in_burst) { // begin burst and set next burst time
+            _in_burst = true;
+            std::mt19937 engine = get_random_engine();
+            simtime_picosec interarrival = (simtime_picosec)_burst_arrival_rate(engine);
+            _next_burst_arrival = eventlist().now() + interarrival;
+            simtime_picosec burst_duration = (simtime_picosec)_burst_duration(engine);
+            _burst_end = eventlist().now() + burst_duration;
+            if(_burst_end > _next_burst_arrival) {
+                _next_burst_arrival = eventlist().now() + interarrival + burst_duration;
+            }
+        }
+
+        if (eventlist().now() > _burst_end) { // end the burst
+            _in_burst = false;
+        } else { // drop the packet
+            return true;
+        }
+    }
+    return false;
+}
+
 
 Queue::Queue(linkspeed_bps bitrate, mem_b maxsize, EventList& eventlist, 
              QueueLogger* logger)

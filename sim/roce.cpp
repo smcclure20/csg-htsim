@@ -118,6 +118,7 @@ void RoceSrc::startflow(){
 
     _start_time = eventlist().now();
     _completion_time = 0;
+    _pauses = 0;
     
     // eventlist().sourceIsPendingRel(*this,0);
     eventlist().sourceIsPendingRel(*this, _packet_spacing + rand()%(_packet_spacing/10));
@@ -266,7 +267,6 @@ void RoceSrc::receivePacket(Packet& pkt)
     case ROCEACK:
         _acks_received++;
         processAck((const RoceAck&)pkt);
-        pkt.free();
         if (plb()) {
             simtime_picosec now = eventlist().now();
             _ecn_marks.emplace_back(pkt.flags() & ECN_CE);
@@ -290,6 +290,7 @@ void RoceSrc::receivePacket(Packet& pkt)
                 _pathid ++;
             }
         }
+        pkt.free();
         return;
     default:
         abort();
@@ -391,6 +392,7 @@ RoceSink::RoceSink()
     //if (get_id() == 144214)
     //    _log_me = true;
     _total_received = 0;
+    _spurious_retransmits = 0;
 }
 
 void RoceSink::log_me() {
@@ -458,6 +460,7 @@ void RoceSink::receivePacket(Packet& pkt) {
         _cumulative_ack = seqno + size - 1;
     } else if (seqno < _cumulative_ack+1) {
         //must have been a bad retransmit
+        _spurious_retransmits++;
     }
     send_ack(ts);
     // have we seen everything yet?

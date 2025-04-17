@@ -169,8 +169,12 @@ int main(int argc, char **argv) {
             if (!strcmp(argv[i+1], "ecmp")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
                 route_strategy = ECMP;
-            } else if (!strcmp(argv[i+1], "ar")) {
+            }else if (!strcmp(argv[i+1], "pkt_ar")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                route_strategy = ADAPTIVE_ROUTING;
+            } else if (!strcmp(argv[i+1], "fl_ar")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::ADAPTIVE_ROUTING);
+                FatTreeSwitch::set_ar_sticky(FatTreeSwitch::PER_FLOWLET);
                 route_strategy = ADAPTIVE_ROUTING;
             } else if (!strcmp(argv[i+1], "ecmp_ar")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP_ADAPTIVE);

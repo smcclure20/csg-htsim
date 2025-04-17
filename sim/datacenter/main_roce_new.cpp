@@ -38,7 +38,7 @@
 
 uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 0.001 ms
 #define DEFAULT_NODES 128
-#define DEFAULT_QUEUE_SIZE 8
+#define DEFAULT_QUEUE_SIZE 15
 
 //FirstFit* ff = NULL;
 //uint32_t subflow_count = 1;
@@ -53,7 +53,7 @@ enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced s
 
 EventList eventlist;
 
-uint64_t high_pfc = 6, low_pfc = 4;
+uint64_t high_pfc = 12, low_pfc = 6;
 
 
 void exit_error(char* progr) {
@@ -236,8 +236,6 @@ int main(int argc, char **argv) {
     RoceSink* sink;
 
     Route* routeout, *routein;
-
-    ConstantCcaRtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
@@ -457,6 +455,8 @@ int main(int argc, char **argv) {
         top->add_host_port(src, sender->flow_id(), sender);
         top->add_host_port(dest, sender->flow_id(), sink);
 
+        ((HostQueue*)top->queues_ns_nlp[src][top->HOST_POD_SWITCH(src)][0])->addHostSender(sender);
+
         sender->connect(srctotor, dsttotor, *sink, crt->start + rand()%(sender->_packet_spacing));
     }
     //    ShortFlows* sf = new ShortFlows(2560, eventlist, net_paths,conns,lg, &swiftRtxScanner);
@@ -493,11 +493,11 @@ int main(int argc, char **argv) {
 
     list <RoceSrc*>::iterator src_i;
 
-    flowlog << "Flow ID,Drops,Completion Time,ReceivedBytes,NACKs,PacketsSent,Pauses" << endl;
+    flowlog << "Flow ID,Drops,Completion Time,ReceivedBytes,NACKs,PacketsSent,Pauses,Spurious Retransmits" << endl;
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         RoceSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << sink->_srcaddr << "-" << (*src_i)->_dstaddr << "," << sink->_drops << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_nacks_received << "," << (*src_i)->_packets_sent << "," << (*src_i)->_pauses << endl;
+        flowlog << sink->_srcaddr << "-" << (*src_i)->_dstaddr << "," << sink->_drops << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_nacks_received << "," << (*src_i)->_packets_sent << "," << (*src_i)->_pauses << "," <<  sink->_spurious_retransmits << endl;
     }
     flowlog.close();
     list <RoceSink*>::iterator sink_i;

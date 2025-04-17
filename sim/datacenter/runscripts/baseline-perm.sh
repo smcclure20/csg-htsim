@@ -1,5 +1,5 @@
 #!/bin/bash
-conns=(10240) #1280 2560 5120 10240 12800
+conns=(128 1280 2560 5120 10240 12800)
 
 for conn in ${conns[@]}
 do 
@@ -14,7 +14,7 @@ do
     # # PLB
     # for i in {1..10}
     # do
-    #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat ecmp -hostlb plb -plbecn 4 -of ../../results/opt-4-2/perm${conn}/plb/opt-perm${conn}-128n-2MB-plb4-${i}.csv -ratecoef 0.9
+    #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat ecmp -hostlb plb -plbecn 4 -of ../../results/opt-4-2/perm${conn}/plb4-t0.6/opt-perm${conn}-128n-2MB-plb4_06-${i}.csv -ratecoef 0.9
     # done
 
     # # RR
@@ -29,23 +29,29 @@ do
     #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat ecmp -hostlb spray -of ../../results/opt-4-2/perm${conn}/spray/opt-perm${conn}-128n-2MB-spray-${i}.csv -ratecoef 0.9
     # done
 
-    # ECMP AR
-    for i in {1..10}
-    do
-        ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat ecmp_ar -of ../../results/opt-4-2/perm${conn}/ecmp-ar/opt-perm${conn}-128n-2MB-ecmpar-${i}.csv -ratecoef 0.9
-    done
+    # # ECMP AR
+    # for i in {1..10}
+    # do
+    #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat ecmp_ar -of ../../results/opt-4-2/perm${conn}/ecmp-ar/opt-perm${conn}-128n-2MB-ecmpar-${i}.csv -ratecoef 0.9
+    # done
 
 
-    # Flowlet AR
-    for i in {1..10}
-    do
-        ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat fl_ar -of ../../results/opt-4-2/perm${conn}/flowlet-ar/opt-perm${conn}-128n-2MB-flowletar-${i}.csv -ratecoef 0.9
-    done
+    # # Flowlet AR
+    # for i in {1..10}
+    # do
+    #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat fl_ar -of ../../results/opt-4-2/perm${conn}/flowlet-ar/opt-perm${conn}-128n-2MB-flowletar-${i}.csv -ratecoef 0.9
+    # done
 
-    # Packet AR
+    # # Packet AR
+    # for i in {1..10}
+    # do
+    #     ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat pkt_ar -of ../../results/opt-4-2/perm${conn}/packet-ar/opt-perm${conn}-128n-2MB-packetar-${i}.csv -ratecoef 0.9
+    # done
+
+    # Subflow 
     for i in {1..10}
     do
-        ./htsim_constcca -end 0 -tm ./connection_matrices/${matrix} -nodes 128 -strat pkt_ar -of ../../results/opt-4-2/perm${conn}/packet-ar/opt-perm${conn}-128n-2MB-packetar-${i}.csv -ratecoef 0.9
+        ./htsim_constcca -end 0 -tm ./connection_matrices/alltoall_128n_2MB.cm -nodes 128 -strat ecmp -of ../../results/opt-4-2/perm${conn}/subflow2-ecmp/opt-ata-128n-2MB-sf2-ecmp-${i}.csv -ratecoef 0.9 -subflows 2
     done
 
 done

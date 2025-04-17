@@ -139,7 +139,15 @@ int main(int argc, char **argv) {
             plb_ecn = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-trim")){
+            queue_type = COMPOSITE;
+        } else if (!strcmp(argv[i],"-trimces")){
             queue_type = COMPOSITE_ECN;
+        } else if (!strcmp(argv[i],"-trimced")){
+            queue_type = COMPOSITE_ECN_DEF;
+        } else if (!strcmp(argv[i],"-trimcel")){
+            queue_type = COMPOSITE_ECN_LB;
+        } else if (!strcmp(argv[i],"-trimcomp")){
+            queue_type = ECN_BIG;
         } else if (!strcmp(argv[i],"-rts")){
             rts = true;
         } else if (!strcmp(argv[i],"-flakylinks")){
@@ -202,6 +210,7 @@ int main(int argc, char **argv) {
 
     queuesize = queuesize*Packet::data_packet_size();
     srand(time(NULL));
+    srandom(time(NULL));
       
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
@@ -209,6 +218,11 @@ int main(int argc, char **argv) {
     cout << "hoststrat " << host_lb << endl;
     cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
+
+    if (host_lb == PLB && queue_type == COMPOSITE) {
+        cout << "PLB and composite queueing not supported (for now)" << endl;
+        exit(1);
+    }
       
     
     // Log of per-flow stats
@@ -238,10 +252,10 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency);
-    if (flaky_links > 0) {
-        top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
-    }
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+    // if (flaky_links > 0) {
+    //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
+    // }
 #endif
 
 #ifdef OV_FAT_TREE
@@ -342,10 +356,17 @@ int main(int argc, char **argv) {
         }
         // TODO: set the number of subflows here (if -subflows == 0) such that the rate  is low enough for a certain dupack threshold
         if (no_of_subflows == 0) {
-            int needed_competing_flows = ceil((6 * 8) / dupack_thresh); // 6q/f 
+            int num_queues = 4;
+            // int num_queues = net_paths[src][dest]->at(0)->hop_count() - 2;
+            // int needed_competing_flows;
+            // if (num_queues == 0) {
+            //     needed_competing_flows = 1;
+            // } else{
+            int needed_competing_flows = ceil((num_queues * 8) / dupack_thresh);
+            // }
             int flows_per_link = int((double)all_conns->size() / no_of_nodes);
             no_of_subflows = std::max(1, (int)((needed_competing_flows)/flows_per_link));
-
+            cout << "Setting number of subflows to " << no_of_subflows << endl;
         }
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections

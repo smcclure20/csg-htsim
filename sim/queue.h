@@ -76,7 +76,7 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
 
     void setBurstArrivalRate(simtime_picosec mean_interarrival_time) {
         _burst_arrival_rate_mean = mean_interarrival_time;
-        _burst_arrival_rate = std::poisson_distribution<>(1.0 / mean_interarrival_time);
+        _burst_arrival_rate = std::poisson_distribution<>(mean_interarrival_time);
     }
     double getBurstArrivalRateMean() {
         return _burst_arrival_rate_mean;
@@ -104,6 +104,8 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
         std::mt19937 engine = get_random_engine();
         _next_burst_arrival = eventlist().now() + (simtime_picosec)_burst_arrival_rate(engine);
     }
+
+    bool checkBurstyLoss();
 
 
 protected:

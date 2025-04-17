@@ -376,7 +376,7 @@ ConstantCcaSubflowSrc::send_next_packet() {
     uint64_t seqno;
     if (_src.more_data_available()) { // todo: clean this up
         seqno = _highest_sent + 1;
-    } else if ((_highest_sent < _recoverq) ) { //((_highest_sent <= _recoverq) && (_src._highest_dsn_ack < _src._flow_size)) {
+    } else if ((_highest_sent <= _highest_sent_abs) ) { //((_highest_sent <= _recoverq) && (_src._highest_dsn_ack < _src._flow_size)) {
         seqno = _highest_sent + 1;
     } else {
         // cout << timeAsUs(eventlist().now()) << " " << nodename() << " no more data" << endl;
@@ -564,7 +564,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         if (total_marks < _plb_threshold_ecn) {
             // not enough marks to be a problem
             _last_good_path = now;
-            _plb_interval = random()%(2*_rtt) + 5*_rtt;
+            _plb_interval = random()%(2*_pacing_delay) + 10*_pacing_delay;
         }
         // simtime_picosec td = _min_rtt * 1.2; // TODO: Find a good threshold for "congestion"
         // if (delay <= td) {
@@ -572,12 +572,13 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         //     _last_good_path = now;
         //     _plb_interval = random()%(2*_rtt) + 5*_rtt;
         // }
-
-        // PLB (simple version)
-        if (now - _last_good_path > _plb_interval) {
-            cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
-            _last_good_path = now;
-            move_path_flow_label();
+        if (total_marks >= _plb_threshold_ecn) {
+            // PLB (simple version)
+            if (now - _last_good_path > _plb_interval) {
+                // cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(_rtt) << endl;
+                _last_good_path = now;
+                move_path_flow_label();
+            }
         }
     }
 
@@ -849,7 +850,7 @@ bool ConstantCcaSrc::more_data_available() const {
     if (_stop_time && eventlist().now() >= _stop_time) {
         return false;
     }
-    return _highest_dsn_sent < _flow_size;
+    return _highest_dsn_sent + mss() <= _flow_size;
 }
 
 void ConstantCcaSrc::doNextEvent() {

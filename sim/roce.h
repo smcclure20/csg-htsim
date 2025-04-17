@@ -187,6 +187,8 @@ public:
     bool _log_me;
 
     uint32_t _srcaddr;
+
+    uint32_t _spurious_retransmits;
     
 private:
  
