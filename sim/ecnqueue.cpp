@@ -17,24 +17,10 @@ ECNQueue::ECNQueue(linkspeed_bps bitrate, mem_b maxsize,
 void
 ECNQueue::receivePacket(Packet & pkt)
 {
-    // enter existing burst of loss or start a new one
-    if (_bursty_loss && (_next_burst_arrival <= eventlist().now() || _in_burst)) {
-        if (!_in_burst) { // begin burst and set next burst time
-            _in_burst = true;
-            std::mt19937 engine = get_random_engine();
-            _next_burst_arrival = eventlist().now() + (simtime_picosec)_burst_arrival_rate(engine);
-            _burst_end = eventlist().now() + (simtime_picosec)_burst_duration(engine);
-            // cout << "ECNQueue::receivePacket: starting burst at " << timeAsUs(eventlist().now()) << endl;
-        }
-
-        if (eventlist().now() > _burst_end) { // end the burst
-            _in_burst = false;
-            // cout << "ECNQueue::receivePacket: ending burst at " << timeAsUs(eventlist().now()) << endl;
-        } else { // drop the packet
-            pkt.free();
-            // cout << "ECNQueue::receivePacket: dropping packet in burst" << endl;
-            return;
-        }
+    bool lost = checkBurstyLoss();
+    if (lost) {
+        pkt.free();
+        return;
     }
 
     //is this a PAUSE packet?

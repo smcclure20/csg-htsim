@@ -343,7 +343,8 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
 FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize,
                                  QueueLoggerFactory* logger_factory,
                                  EventList* ev,FirstFit * fit, queue_type qtype,
-                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts, simtime_picosec hoplatency){
+                                 queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts, simtime_picosec hoplatency,
+                                 int flakylinks, simtime_picosec interarrival, simtime_picosec duration){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
     if (hoplatency != 0) {
@@ -364,7 +365,11 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
     failed_links = num_failed;
     fail_bw_pct = fail_pct;
     _rts = rts;
-    flaky_links = 0;
+    flaky_links = flakylinks;
+    if (flaky_links > 0) {
+        _link_loss_burst_interarrival_time = interarrival;
+        _link_loss_burst_duration = duration;
+    }
 
     cout << "Fat tree topology (3) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -688,7 +693,7 @@ FatTreeTopology::alloc_queue(QueueLogger* queueLogger, linkspeed_bps speed, mem_
             return q;
         }
     case ECN:
-        return new ECNQueue(speed, queuesize, *_eventlist, queueLogger, memFromPkt(15));
+        return new ECNQueue(speed, queuesize, *_eventlist, queueLogger, FatTreeSwitch::_ecn_threshold_fraction * queuesize);
     case ECN_PRIO:
         return new ECNPrioQueue(speed, queuesize, queuesize,
                                 FatTreeSwitch::_ecn_threshold_fraction * queuesize,
@@ -699,12 +704,31 @@ FatTreeTopology::alloc_queue(QueueLogger* queueLogger, linkspeed_bps speed, mem_
     case LOSSLESS_INPUT:
         return new LosslessOutputQueue(speed, queuesize, *_eventlist, queueLogger);
     case LOSSLESS_INPUT_ECN: 
-        return new LosslessOutputQueue(speed, memFromPkt(10000), *_eventlist, queueLogger,1,memFromPkt(16));
+        return new LosslessOutputQueue(speed, queuesize*10, *_eventlist, queueLogger,1,FatTreeSwitch::_ecn_threshold_fraction * queuesize);
     case COMPOSITE_ECN:
-        if (tor && dir == DOWNLINK) 
-            return new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
-        else
+        if (tor && dir == DOWNLINK) {
+            CompositeQueue* q = new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
+            q->setRTS(_rts);
+            return q;
+        } else {
+            return new ECNQueue(speed, queuesize, *_eventlist, queueLogger, FatTreeSwitch::_ecn_threshold_fraction * queuesize);
+            // return new ECNQueue(speed, memFromPkt(2*SWITCH_BUFFER), *_eventlist, queueLogger, memFromPkt(15));
+        }
+    case COMPOSITE_ECN_DEF:
+        if (tor && dir == DOWNLINK) {
+            CompositeQueue* q = new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
+            q->setRTS(_rts);
+            return q;
+        } else {
+            // return new ECNQueue(speed, queuesize, *_eventlist, queueLogger, FatTreeSwitch::_ecn_threshold_fraction * queuesize);
             return new ECNQueue(speed, memFromPkt(2*SWITCH_BUFFER), *_eventlist, queueLogger, memFromPkt(15));
+        }
+    case ECN_BIG:
+        if (tor && dir == DOWNLINK) {
+            return new ECNQueue(speed, queuesize, *_eventlist, queueLogger, FatTreeSwitch::_ecn_threshold_fraction * queuesize);
+        } else {
+            return new ECNQueue(speed, memFromPkt(2*SWITCH_BUFFER), *_eventlist, queueLogger, memFromPkt(15));
+        }
     case COMPOSITE_ECN_LB:
         {
             CompositeQueue* q = new CompositeQueue(speed, queuesize, *_eventlist, queueLogger);
@@ -712,6 +736,7 @@ FatTreeTopology::alloc_queue(QueueLogger* queueLogger, linkspeed_bps speed, mem_
                 // don't use ECN on ToR downlinks
                 q->set_ecn_threshold(FatTreeSwitch::_ecn_threshold_fraction * queuesize);
             }
+            q->setRTS(_rts);
             return q;
         }
     default:
