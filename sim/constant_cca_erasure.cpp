@@ -2,6 +2,8 @@
 #include "constant_cca_erasure.h"
 #include <iostream>
 #include <math.h>
+#include <vector>
+#include <algorithm>
 
 ////////////////////////////////////////////////////////////////
 //  PACER
@@ -109,6 +111,12 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _plb_interval = timeFromSec(1);  // disable PLB til we've seen some traffic
     _path_index = 0;  
     _last_good_path = eventlist.now();
+
+    _adaptive= false;
+    _ev_count = 32;
+    _path_qualities.assign(_ev_count, 0.0);
+    _path_skipped.assign(_ev_count, false);
+    _pathid = 0;
     
 
     _mss = Packet::data_packet_size();
@@ -189,6 +197,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     simtime_picosec ts_echo = p->ts_echo();
     simtime_picosec rtt = eventlist().now() - ts_echo;
+    uint32_t pathid = p->pathid();
     _bytes_acked = p->ackno();
     p->free();
 
@@ -216,7 +225,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
         if (total_marks < _plb_threshold_ecn) {
             // not enough marks to be a problem
             _last_good_path = now;
-            _plb_interval = random()%(2*rtt) + 5*rtt;
+            _plb_interval = random()%(2*_pacing_delay) + 10*_pacing_delay;
         }
         // simtime_picosec td = _min_rtt * 1.2; // TODO: Find a good threshold for "congestion"
         // if (delay <= td) {
@@ -231,6 +240,20 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
             _last_good_path = now;
             move_path_flow_label();
         }
+    }
+    if (adaptive()) {
+        bool ecn_mark = pkt.flags() & ECN_CE;
+        // double current_quality = _path_qualities.at(pathid);
+        // double new_quality;
+        // if (ecn_mark) {
+        //     new_quality = 0.25 + (current_quality * 0.75);
+        // } else {
+        //     new_quality = 0 + (current_quality * 0.75);
+        // }
+        // _path_qualities.at(pathid) = new_quality;
+        _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
+        //((int)ecn_mark * 0.25) + (current_quality * 0.75);// (high is bad)
+        // _path_qualities[_pathid] = (rtt * 0.25) + (_path_qualities[_pathid] * 0.75); // can also do this based on ecn
     }
 }
 
@@ -264,6 +287,31 @@ void
 ConstantErasureCcaSrc::move_path_flow_label() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
+    if (adaptive()) {
+        _pathid = _pathid % _ev_count;
+        if (_packets_sent < _ev_count +1) {
+            return;
+        }
+        std::vector<double> copy = _path_qualities;
+        std::sort(copy.begin(), copy.end());
+        double upperquartile = copy[(int)(_ev_count * 8 / 10)];
+        double median = copy[(int)(_ev_count * 5 / 10)];
+
+        double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
+        double average = sum / _path_qualities.size();
+        double sq_sum = std::inner_product(_path_qualities.begin(), _path_qualities.end(), _path_qualities.begin(), 0.0, std::plus<double>(), [average](double x, double y){return std::pow(x - average, 2);});
+        double variance = sq_sum / _path_qualities.size();
+        double sd = std::sqrt(variance);
+
+        while (_path_qualities[_pathid] > upperquartile &&  _path_qualities[_pathid] > average + 2 * sd) { // if path was skipped, should give it another try?
+            // cout << "bad path " << _pathid << endl;
+            _path_skipped[_pathid] = true;
+            _path_qualities[_pathid] =  0.125 + 0.75 * _path_qualities[_pathid]; // this way, if you get an ECN mark every time you try it, that is worse than getting an ECN mark half of the time
+            _pathid = (_pathid + 1) % _ev_count;
+        }
+        _path_skipped[_pathid] = false;
+        
+    }
 }
 
 void

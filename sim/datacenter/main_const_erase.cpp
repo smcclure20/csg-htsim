@@ -48,7 +48,7 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 
 enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
-enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced spraying (tracking EVs)
+enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2, SPRAY_ADAPTIVE = 3};
 
 EventList eventlist;
 
@@ -161,6 +161,8 @@ int main(int argc, char **argv) {
                 host_lb = SPRAY;
             } else if (!strcmp(argv[i+1], "plb")) {
                 host_lb = PLB;
+            } else if (!strcmp(argv[i+1], "sprayad")) {
+                host_lb = SPRAY_ADAPTIVE;
             } else {
                 exit_error(argv[0]);
             }
@@ -198,7 +200,8 @@ int main(int argc, char **argv) {
     eventlist.setEndtime(endtime);
 
     queuesize = queuesize*Packet::data_packet_size();
-    srand(13);
+    srand(time(NULL));
+    srandom(time(NULL));
       
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
@@ -233,10 +236,10 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency);
-    if (flaky_links > 0) {
-        top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
-    }
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+    // if (flaky_links > 0) {
+    //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
+    // }
 #endif
 
 #ifdef OV_FAT_TREE
@@ -350,6 +353,9 @@ int main(int argc, char **argv) {
             sender->set_plb_threshold_ecn(plb_ecn);
         } else if (host_lb == SPRAY) {
             sender->set_spraying();
+        }  else if (host_lb == SPRAY_ADAPTIVE) {
+            sender->set_spraying();
+            sender->set_adaptive();
         }
         srcs.push_back(sender);
         sink = new ConstantErasureCcaSink();

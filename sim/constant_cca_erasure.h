@@ -91,6 +91,12 @@ public:
     bool _spraying;
     void set_spraying() {_spraying = true;}
     inline bool spraying() const {return _spraying;}
+    bool _adaptive;
+    void set_adaptive() {_adaptive = true;}
+    inline bool adaptive() const {return _adaptive;}
+    int _ev_count;
+    std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
+    std::vector<bool> _path_skipped;
 
 
     // should really be private, but loggers want to see:

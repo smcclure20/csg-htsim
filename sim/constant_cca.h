@@ -95,6 +95,10 @@ public:
     bool _spraying;
     void set_spraying() {_spraying = true;}
     inline bool spraying() const {return _spraying;}
+    bool _adaptive;
+    void set_adaptive() {_adaptive = true;}
+    inline bool adaptive() const {return _adaptive;}
+    int _ev_count;
 
 
     // should really be private, but loggers want to see:
@@ -223,6 +227,10 @@ protected:
     simtime_picosec _last_good_path;
     std::deque<bool> _ecn_marks;
     int _plb_threshold_ecn;
+
+    // Adaptive spraying stuff
+    std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
+    std::vector<bool> _path_skipped;
 
     uint32_t _drops;
     simtime_picosec _RFC2988_RTO_timeout;

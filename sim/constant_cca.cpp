@@ -123,6 +123,9 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _path_index = 0;  
     _last_good_path = src.eventlist().now();
     _plb_threshold_ecn = src._plb_threshold_ecn;
+
+    _path_qualities.assign(src._ev_count, 0.0);
+    _path_skipped.assign(src._ev_count, false);
     
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
@@ -447,7 +450,7 @@ ConstantCcaSubflowSrc::retransmit_packet() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     // cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
     ConstantCcaPacket::seq_t dsn = _dsn_map[_last_acked+1];
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid);
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid); // TODO: should probably increment the path label after sending here too 
 
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -528,6 +531,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
   
   
     ts_echo = p->ts_echo();
+    uint32_t pathid = p->pathid();
     p->free();
 
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " recvack  " << ackno << " ts_echo " << timeAsUs(ts_echo) << endl;
@@ -580,6 +584,11 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
                 move_path_flow_label();
             }
         }
+    }
+    if (_src.adaptive()) {
+        bool ecn_mark = pkt.flags() & ECN_CE;
+        _path_qualities[pathid] = (ecn_mark * 0.25) + (_path_qualities[pathid] * 0.75);// (high is bad)
+        // _path_qualities[_pathid] = (delay * 0.25) + (_path_qualities[_pathid] * 0.75); // can also do this based on ecn
     }
 
     _src.update_dsn_ack(ds_ackno);
@@ -685,6 +694,18 @@ void
 ConstantCcaSubflowSrc::move_path_flow_label() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
+    if (_src.adaptive()) {
+        _pathid = _pathid % _src._ev_count;
+        double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
+        double average = sum / _path_qualities.size();
+        if (_path_qualities[_pathid] > average) {
+            // cout << "bad path " << _pathid << endl;
+            _pathid = (_pathid + 1) % _src._ev_count;
+            _path_skipped[_pathid] = true;
+        } else {
+            _path_skipped[_pathid] = false;
+        }
+    }
 }
 
 void
@@ -733,6 +754,8 @@ ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventLis
     _plb = false; // enable using enable_plb()
     _spraying = false;
     _fr_disabled = false;
+    _adaptive = false;
+    _ev_count = 32;
 
     _addr = addr;
     _pacing_delay = pacing_delay;
