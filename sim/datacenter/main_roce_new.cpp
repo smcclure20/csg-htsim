@@ -239,10 +239,10 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, snd_type, link_failures, failure_pct, false, latency);
-    if (flaky_links > 0) {
-        top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
-    }
+                                               NULL, &eventlist, NULL, queue_type, snd_type, link_failures, failure_pct, false, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+    // if (flaky_links > 0) {
+    //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
+    // }
 #endif
 
 #ifdef OV_FAT_TREE
@@ -343,6 +343,7 @@ int main(int argc, char **argv) {
         }
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)); // assumes all nodes have the same number of connections
+        rate = rate * rate_coef;
         // simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
         sender = new RoceSrc(NULL, NULL, eventlist,rate);  
         sender->set_dst(dest);

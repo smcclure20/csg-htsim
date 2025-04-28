@@ -48,7 +48,7 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 
 enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
-enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2}; // TODO: add more advanced spraying (tracking EVs)
+enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2, SPRAY_ADAPTIVE = 3};
 
 EventList eventlist;
 
@@ -172,6 +172,8 @@ int main(int argc, char **argv) {
                 host_lb = SPRAY;
             } else if (!strcmp(argv[i+1], "plb")) {
                 host_lb = PLB;
+            } else if (!strcmp(argv[i+1], "sprayad")) {
+                host_lb = SPRAY_ADAPTIVE;
             } else {
                 exit_error(argv[0]);
             }
@@ -365,7 +367,7 @@ int main(int argc, char **argv) {
             int needed_competing_flows = ceil((num_queues * 8) / dupack_thresh);
             // }
             int flows_per_link = int((double)all_conns->size() / no_of_nodes);
-            no_of_subflows = std::max(1, (int)((needed_competing_flows)/flows_per_link));
+            no_of_subflows = std::max(1, (int)ceil((needed_competing_flows)/flows_per_link));
             cout << "Setting number of subflows to " << no_of_subflows << endl;
         }
 
@@ -386,6 +388,9 @@ int main(int argc, char **argv) {
             sender->set_plb_threshold_ecn(plb_ecn);
         } else if (host_lb == SPRAY) {
             sender->set_spraying();
+        } else if (host_lb == SPRAY_ADAPTIVE) {
+            sender->set_spraying();
+            sender->set_adaptive();
         }
         if (dupack_thresh != 3) {
             // int k = (4*no_of_nodes )^ (1/3);

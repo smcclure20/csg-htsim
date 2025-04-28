@@ -166,7 +166,8 @@ int main(int argc, char **argv) {
     eventlist.setEndtime(endtime);
 
     queuesize = queuesize*Packet::data_packet_size();
-    srand(13);
+    srand(time(NULL));
+    srandom(time(NULL));
       
     cout << "requested nodes " << no_of_nodes << endl;
     cout << "cwnd " << cwnd << endl;
