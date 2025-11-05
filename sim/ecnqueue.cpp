@@ -17,12 +17,6 @@ ECNQueue::ECNQueue(linkspeed_bps bitrate, mem_b maxsize,
 void
 ECNQueue::receivePacket(Packet & pkt)
 {
-    bool lost = checkBurstyLoss();
-    if (lost) {
-        pkt.free();
-        return;
-    }
-
     //is this a PAUSE packet?
     if (pkt.type()==ETH_PAUSE){
         EthPausePacket* p = (EthPausePacket*)&pkt;
@@ -101,8 +95,14 @@ ECNQueue::completeService()
     pkt->flow().logTraffic(*pkt, *this, TrafficLogger::PKT_DEPART);
     if (_logger) _logger->logQueue(*this, QueueLogger::PKT_SERVICE, *pkt);
 
-    /* tell the packet to move on to the next pipe */
-    pkt->sendOn();
+    bool lost = checkBurstyLoss() || _drop_all;
+    if (lost) {
+        pkt->free();
+    }
+    else {
+        /* tell the packet to move on to the next pipe */
+        pkt->sendOn();
+    }
 
     //_virtual_time += drainTime(pkt);
 

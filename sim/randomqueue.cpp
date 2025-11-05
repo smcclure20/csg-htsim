@@ -24,13 +24,7 @@ RandomQueue::receivePacket(Packet& pkt)
     double drop_prob = 0;
     int crt = _queuesize + pkt.size();
 
-    bool lost = checkBurstyLoss();
-    if (lost) {
-        pkt.free();
-        return;
-    }
-
-    if (drand() < _stochastic_loss_rate) {
+    if (drand() < _stochastic_loss_rate) { // TODO: might want to move this to send side
         pkt.free();
         return;
     }

@@ -97,6 +97,14 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
         return _bursty_loss;
     }
 
+    void setDropAll (bool drop_all) {
+        _drop_all = drop_all;
+    }
+
+    bool getDropAll () {
+        return _drop_all;
+    }
+
     void setBurstyLossParameters(simtime_picosec mean_interarrival_time, simtime_picosec mean_duration) {
         setBurstArrivalRate(mean_interarrival_time);
         setBurstDuration(mean_duration);
@@ -139,6 +147,7 @@ protected:
     simtime_picosec _burst_duration_mean = 0;
     std::exponential_distribution<> _burst_duration;
     simtime_picosec _burst_end = 0;
+    bool _drop_all = false; // used for when BW is 0%
 };
 
 
