@@ -61,7 +61,7 @@ public:
 
     inline static ConstantCcaAck* newpkt(PacketFlow &flow, const Route &route, 
                                    seq_t seqno, seq_t ackno, seq_t ds_ackno,
-                                   simtime_picosec ts_echo, uint32_t dst, uint32_t src, uint32_t pathid) {
+                                   simtime_picosec ts_echo, uint32_t dst, uint32_t src, uint32_t pathid, uint64_t bitmap=0) {
         ConstantCcaAck* p = _packetdb.allocPacket();
         p->set_route(flow,route,ACKSIZE,ackno);
         p->_type = CONSTCCAACK;
@@ -74,6 +74,7 @@ public:
         p->_pathid = pathid;
         p->_direction = NONE;
         p->_is_nack = false;
+        p->_bitmap = bitmap;
         return p;
     }
 
@@ -92,6 +93,7 @@ public:
         p->_pathid = pathid;
         p->_direction = NONE;
         p->_is_nack = true;
+        p->_bitmap = 0;
         return p;
     }
 
@@ -101,6 +103,7 @@ public:
     inline seq_t ds_ackno() const {return _ds_ackno;}
     inline simtime_picosec ts_echo() const {return _ts_echo;}
     inline bool is_nack() const {return _is_nack;}
+    inline uint64_t bitmap() const {return _bitmap;}
     virtual PktPriority priority() const {return Packet::PRIO_HI;}
 
     virtual ~ConstantCcaAck(){}
@@ -111,6 +114,7 @@ protected:
     seq_t _ds_ackno;
     simtime_picosec _ts_echo;
     bool _is_nack;
+    uint64_t _bitmap;
     static PacketDB<ConstantCcaAck> _packetdb;
 };
 
