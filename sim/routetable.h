@@ -39,6 +39,7 @@ protected:
 
 };
 
+// TODO: some easy way to re-weight routes 
 class RouteTable {
 public:
     RouteTable() {};
@@ -46,10 +47,15 @@ public:
     void addHostRoute(int destination, Route* port, int flowid);  
     void setRoutes(int destination, vector<FibEntry*>* routes);  
     vector <FibEntry*>* getRoutes(int destination);
+    vector <FibEntry*>* getWeightedRoutes(int destination);
+    void setWeighted(bool weighted) {_weighted=weighted;}
+    bool getWeighted() {return _weighted;}
     HostFibEntry* getHostRoute(int destination, int flowid);
     
 private:
     unordered_map<int,vector<FibEntry*>* > _fib;
+    bool _weighted;
+    unordered_map<int,vector<FibEntry*>* > _weighted_fib;
     unordered_map<int,unordered_map<int,HostFibEntry*>*> _hostfib;
 };
 

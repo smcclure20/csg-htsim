@@ -117,16 +117,22 @@ public:
     uint32_t radix_down(int tier) const {return _radix_down[tier];}
     uint32_t queue_up(int tier) const {return _queue_up[tier];}
     uint32_t queue_down(int tier) const {return _queue_down[tier];}
+    bool weighted() {return _weighted;}
+    void set_weighted(bool weighted) {_weighted = weighted;}
 
     void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+
+    void add_symmetric_failures(int failures);
 
     // add loggers to record total queue size at switches
     virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 
 
+    // Returns the ToR number of the given host
     uint32_t HOST_POD_SWITCH(uint32_t src){
         return src/_radix_down[TOR_TIER];
     }
 
+    // Returns ID within the pod of a given host
     uint32_t HOST_POD_ID(uint32_t src){
         if (_tiers == 3)
             return src%_hosts_per_pod;
@@ -135,6 +141,7 @@ public:
             return src;
     }
 
+    // Returns the pod number of the given host
     uint32_t HOST_POD(uint32_t src){
         if (_tiers == 3) 
             return src/_hosts_per_pod;
@@ -233,6 +240,8 @@ private:
     bool _rts;
     simtime_picosec _link_loss_burst_interarrival_time;
     simtime_picosec _link_loss_burst_duration;
+
+    bool _weighted;
 };
 
 #endif

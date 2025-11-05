@@ -8,10 +8,20 @@
 void RouteTable::addRoute(int destination, Route* port, int cost, packet_direction direction){  
     if (_fib.find(destination) == _fib.end())
         _fib[destination] = new vector<FibEntry*>(); 
+
+    if (_weighted && (_weighted_fib.find(destination) == _weighted_fib.end()))
+        _weighted_fib[destination] = new vector<FibEntry*>(); 
     
     assert(port!=NULL);
 
     _fib[destination]->push_back(new FibEntry(port,cost,direction));
+
+    if (_weighted) {
+        for (int i = 0; i < cost; i++) { // leveraging cost because I think it is otherwise unused -- todo check
+            _weighted_fib[destination]->push_back(new FibEntry(port,cost,direction));
+        }
+    }
+
 }
 
 void RouteTable::addHostRoute(int destination, Route* port, int flowid){  
@@ -29,6 +39,13 @@ vector<FibEntry*>* RouteTable::getRoutes(int destination){
         return NULL;
     else        
         return _fib[destination];
+}
+
+vector<FibEntry*>* RouteTable::getWeightedRoutes(int destination){
+    if (_weighted_fib.find(destination) == _weighted_fib.end())
+        return NULL;
+    else        
+        return _weighted_fib[destination];
 }
 
 HostFibEntry* RouteTable::getHostRoute(int destination,int flowid){

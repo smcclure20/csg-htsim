@@ -958,10 +958,18 @@ void FatTreeTopology::init_network(){
                         queueLogger = NULL;
                     }
         
-                    if ((l+agg*_agg_switches_per_pod)<failed_links){
-                        queues_nc_nup[core][agg][b] = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER]*fail_bw_pct, _queue_down[CORE_TIER],
+                    if ((l+agg*_agg_switches_per_pod)<failed_links){ // -> l < failed_links does this per-pod
+                        double bw_pct = fail_bw_pct;
+                        if (fail_bw_pct == 0.0) { // TODO: clean this up
+                            bw_pct = 1.0;
+                        }
+                        BaseQueue* q = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER]*bw_pct, _queue_down[CORE_TIER],
                                                                DOWNLINK, CORE_TIER, false);
-                        cout << "Adding link failure for agg_sw " << ntoa(agg) << " l " << ntoa(l) << " b " << ntoa(b) << endl;
+                        if (fail_bw_pct == 0.0) {
+                            q->setDropAll(true);
+                        }
+                        queues_nc_nup[core][agg][b] = q;
+                        cout << "Adding link failure for agg_sw " << ntoa(agg) << " l " << ntoa(l) << " b " << ntoa(b) << " bw " << _downlink_speeds[CORE_TIER]*fail_bw_pct << " drop all " << q->getDropAll() <<  endl;
                     } else if ((l+agg*_agg_switches_per_pod)<flaky_links) {
                         BaseQueue* q = alloc_queue(queueLogger, _downlink_speeds[CORE_TIER], _queue_down[CORE_TIER],
                                                                DOWNLINK, CORE_TIER, false);
@@ -1032,6 +1040,7 @@ void FatTreeTopology::add_failed_link(uint32_t type, uint32_t switch_id, uint32_
     uint32_t k = podpos * _agg_switches_per_pod + link_id;
 
     // note: if bundlesize > 1, we only fail the first link in a bundle.
+    std::cout << "Failing the link between agg switch " << switch_id << " and core switch " <<  k << std::endl;
     
     assert(queues_nup_nc[switch_id][k][0]!=NULL && queues_nc_nup[k][switch_id][0]!=NULL );
     queues_nup_nc[switch_id][k][0] = NULL;
@@ -1040,6 +1049,16 @@ void FatTreeTopology::add_failed_link(uint32_t type, uint32_t switch_id, uint32_
     assert(pipes_nup_nc[switch_id][k][0]!=NULL && pipes_nc_nup[k][switch_id][0]);
     pipes_nup_nc[switch_id][k][0] = NULL;
     pipes_nc_nup[k][switch_id][0] = NULL;
+}
+
+void FatTreeTopology::add_symmetric_failures(int failures) {
+    for (uint32_t p = 0; p < NPOD; p++) {
+        for (uint32_t i = 0; i < (uint32_t)failures; i++) {
+            uint32_t switch_id = _agg_switches_per_pod * p + (int)(i / _radix_up[AGG_TIER]);
+            add_failed_link(FatTreeSwitch::AGG, switch_id, i % _radix_up[AGG_TIER]);
+        }
+    }
+    
 }
 
 Route* FatTreeTopology::get_tor_route(uint32_t hostnum) {
