@@ -115,7 +115,16 @@ CompositeQueue::completeService(){
     }
     
     pkt->flow().logTraffic(*pkt,*this,TrafficLogger::PKT_DEPART);
-    pkt->sendOn();
+
+    bool lost = checkBurstyLoss() || _drop_all;
+    if (lost) {
+        pkt->free();
+    }
+    else {
+        /* tell the packet to move on to the next pipe */
+        pkt->sendOn();
+    }
+
 
     //_virtual_time += drainTime(pkt);
   
@@ -137,12 +146,6 @@ CompositeQueue::receivePacket(Packet& pkt)
 {
     pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_ARRIVE);
     if (_logger) _logger->logQueue(*this, QueueLogger::PKT_ARRIVE, pkt);
-
-    bool lost = checkBurstyLoss();
-    if (lost) {
-        pkt.free();
-        return;
-    }
 
     if (drand() < _stochastic_loss_rate) {
         pkt.free();

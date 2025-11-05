@@ -80,7 +80,16 @@ CompositePrioQueue::completeService(){
     
     pkt->flow().logTraffic(*pkt,*this,TrafficLogger::PKT_DEPART);
     if (_logger) _logger->logQueue(*this, QueueLogger::PKT_SERVICE, *pkt);
-    pkt->sendOn();
+    
+    bool lost = checkBurstyLoss() || _drop_all;
+    if (lost) {
+        pkt->free();
+    }
+    else {
+        /* tell the packet to move on to the next pipe */
+        pkt->sendOn();
+    }
+
 
     _serv = QUEUE_INVALID;
   
@@ -99,12 +108,6 @@ void
 CompositePrioQueue::receivePacket(Packet& pkt)
 {
     pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_ARRIVE);
-
-    bool lost = checkBurstyLoss();
-    if (lost) {
-        pkt.free();
-        return;
-    }
 
     if (drand() < _stochastic_loss_rate) {
         pkt.free();
