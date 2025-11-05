@@ -16,6 +16,7 @@
 #include "constant_cca_packet.h"
 #include "constant_cca_scheduler.h"
 #include "ecn.h"
+#include "uec_mp.h"
 
 #define timeInf 0
 
@@ -63,7 +64,7 @@ public:
 
     void set_flowsize(uint64_t flow_size_in_bytes, int erasure_k) {
         _flow_size = flow_size_in_bytes + mss() + erasure_k * mss();
-        cout << "Setting flow size to " << _flow_size << endl;
+        // cout << "Setting flow size to " << _flow_size << endl;
     }
 
     void set_stoptime(simtime_picosec stop_time) { // can remove?
@@ -86,6 +87,9 @@ public:
     bool _plb;
     inline bool plb() const {return _plb;}
     void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
+    // timeouts for plb
+    simtime_picosec _oldest_sent;
+    uint32_t _oldest_pathid;
 
     // packet switching
     bool _spraying;
@@ -94,12 +98,12 @@ public:
     bool _adaptive;
     void set_adaptive() {_adaptive = true;}
     inline bool adaptive() const {return _adaptive;}
+    UecMpReps _uec_mp = UecMpReps(8, false, true);
     int _ev_count;
     std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
     std::vector<bool> _path_skipped;
 
 
-    // should really be private, but loggers want to see:
     uint64_t _flow_size;
     inline uint64_t flow_size() const {return _flow_size;}
     simtime_picosec _stop_time;
@@ -117,6 +121,10 @@ public:
 
     // paths for PLB or MPSwift
     vector<const Route*> _paths;
+
+    //round trip time estimate
+    simtime_picosec _rtt, _rto, _min_rto, _mdev;
+    void update_rtt(simtime_picosec delay);
 
     ConstantErasureCcaSink* _sink;
     uint32_t _destination;

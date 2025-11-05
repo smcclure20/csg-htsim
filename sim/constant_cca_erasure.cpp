@@ -113,9 +113,9 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _last_good_path = eventlist.now();
 
     _adaptive= false;
-    _ev_count = 32;
-    _path_qualities.assign(_ev_count, 0.0);
-    _path_skipped.assign(_ev_count, false);
+    // _ev_count = 32;
+    // _path_qualities.assign(_ev_count, 0.0);
+    // _path_skipped.assign(_ev_count, false);
     _pathid = 0;
     
 
@@ -130,6 +130,12 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     // PLB init
     _plb = false; // enable using enable_plb()
     _spraying = false;
+
+    _oldest_sent = timeInf;
+    _min_rto = timeFromUs((uint32_t)10);
+    _rtt = 0;
+    _rto = timeFromMs(1);
+    _mdev = 0;
 
     _nodename = "consterasurecca_src_" + std::to_string(get_id());
 }
@@ -163,6 +169,10 @@ ConstantErasureCcaSrc::send_next_packet() {
     }
     _deferred_send = false;
 
+    if (adaptive()) {
+        _pathid = _uec_mp.nextEntropy(_current_seqno, 0); // current_cwnd is unused
+    }
+
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _current_seqno, 0, mss(), _destination, _addr, _pathid);
     _packets_sent++;  
     _current_seqno += mss();
@@ -171,8 +181,21 @@ ConstantErasureCcaSrc::send_next_packet() {
     p->sendOn();
     _pacer.just_sent();
 
+
     if (spraying()) { // switch path on every packet
         move_path_flow_label();
+    }
+
+    if(_oldest_sent == timeInf) {
+        _oldest_sent = eventlist().now();
+        _oldest_pathid = _pathid;
+    } 
+    else if (plb() && eventlist().now() - _oldest_sent > _rto) { // If no packets have gotten through, reroute
+        _last_good_path = eventlist().now();
+        move_path_flow_label();
+        _oldest_sent = eventlist().now();
+    } else if (adaptive() && eventlist().now() - _oldest_sent > _rto) {
+        _uec_mp.processEv(_oldest_pathid, UecMultipath::PATH_TIMEOUT); // THis is not the right path id! 
     }
 
     return true;
@@ -190,6 +213,31 @@ ConstantErasureCcaSrc::send_callback() {
     send_packets();
 }
 
+void
+ConstantErasureCcaSrc::update_rtt(simtime_picosec delay) {
+    // calculate TCP-like RTO.  Not clear this is right for Swift
+    if (delay!=0){
+        if (_rtt>0){
+            uint64_t abs;
+            if (delay > _rtt)
+                abs = delay - _rtt;
+            else
+                abs = _rtt - delay;
+
+            _mdev = 3 * _mdev / 4 + abs/4;
+            _rtt = 7*_rtt/8 + delay/8;
+            _rto = _rtt + 4*_mdev;
+        } else {
+            _rtt = delay;
+            _mdev = delay/2;
+            _rto = _rtt + 4*_mdev;
+        }
+    }
+
+    if (_rto <_min_rto)
+        _rto = _min_rto;
+}
+
 
 void
 ConstantErasureCcaSrc::receivePacket(Packet& pkt) 
@@ -197,9 +245,12 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     ConstantCcaAck *p = (ConstantCcaAck*)(&pkt);
     simtime_picosec ts_echo = p->ts_echo();
     simtime_picosec rtt = eventlist().now() - ts_echo;
+    update_rtt(rtt);
     uint32_t pathid = p->pathid();
     _bytes_acked = p->ackno();
     p->free();
+
+    _oldest_sent = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
 
     // if ((_current_seqno >= _flow_size) && (!is_complete())) {
     //     // now only send packets on receiving an ACK
@@ -242,18 +293,10 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
         }
     }
     if (adaptive()) {
-        bool ecn_mark = pkt.flags() & ECN_CE;
-        // double current_quality = _path_qualities.at(pathid);
-        // double new_quality;
-        // if (ecn_mark) {
-        //     new_quality = 0.25 + (current_quality * 0.75);
-        // } else {
-        //     new_quality = 0 + (current_quality * 0.75);
-        // }
-        // _path_qualities.at(pathid) = new_quality;
-        _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
-        //((int)ecn_mark * 0.25) + (current_quality * 0.75);// (high is bad)
-        // _path_qualities[_pathid] = (rtt * 0.25) + (_path_qualities[_pathid] * 0.75); // can also do this based on ecn
+        UecMultipath::PathFeedback feedback = pkt.flags() & ECN_CE ? UecMultipath::PATH_ECN : UecMultipath::PATH_GOOD;
+        _uec_mp.processEv(pathid, feedback);
+        // bool ecn_mark = pkt.flags() & ECN_CE;
+        // _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
     }
 }
 
@@ -274,7 +317,7 @@ ConstantErasureCcaSrc::connect(ConstantErasureCcaSink& sink, simtime_picosec sta
     new_route->push_back(_sink);
     _route = new_route;
     _flow.set_id(get_id()); // identify the packet flow with the source that generated it
-    cout << "connect, flow id is now " << _flow.get_id() << endl;
+    // cout << "connect, flow id is now " << _flow.get_id() << endl;
     // cout << "connect, flow id (flow_id()) is now " << _flow.flow_id() << endl;
     _scheduler = dynamic_cast<ConstBaseScheduler*>(routeout.at(0));
     _scheduler->add_src(_flow.flow_id(), this);
@@ -287,31 +330,31 @@ void
 ConstantErasureCcaSrc::move_path_flow_label() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
-    if (adaptive()) {
-        _pathid = _pathid % _ev_count;
-        if (_packets_sent < _ev_count +1) {
-            return;
-        }
-        std::vector<double> copy = _path_qualities;
-        std::sort(copy.begin(), copy.end());
-        double upperquartile = copy[(int)(_ev_count * 8 / 10)];
-        double median = copy[(int)(_ev_count * 5 / 10)];
+    // if (adaptive()) {
+    //     _pathid = _pathid % _ev_count;
+    //     if (_packets_sent < _ev_count +1) {
+    //         return;
+    //     }
+    //     std::vector<double> copy = _path_qualities;
+    //     std::sort(copy.begin(), copy.end());
+    //     double upperquartile = copy[(int)(_ev_count * 8 / 10)];
+    //     double median = copy[(int)(_ev_count * 5 / 10)];
 
-        double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
-        double average = sum / _path_qualities.size();
-        double sq_sum = std::inner_product(_path_qualities.begin(), _path_qualities.end(), _path_qualities.begin(), 0.0, std::plus<double>(), [average](double x, double y){return std::pow(x - average, 2);});
-        double variance = sq_sum / _path_qualities.size();
-        double sd = std::sqrt(variance);
+    //     double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
+    //     double average = sum / _path_qualities.size();
+    //     double sq_sum = std::inner_product(_path_qualities.begin(), _path_qualities.end(), _path_qualities.begin(), 0.0, std::plus<double>(), [average](double x, double y){return std::pow(x - average, 2);});
+    //     double variance = sq_sum / _path_qualities.size();
+    //     double sd = std::sqrt(variance);
 
-        while (_path_qualities[_pathid] > upperquartile &&  _path_qualities[_pathid] > average + 2 * sd) { // if path was skipped, should give it another try?
-            // cout << "bad path " << _pathid << endl;
-            _path_skipped[_pathid] = true;
-            _path_qualities[_pathid] =  0.125 + 0.75 * _path_qualities[_pathid]; // this way, if you get an ECN mark every time you try it, that is worse than getting an ECN mark half of the time
-            _pathid = (_pathid + 1) % _ev_count;
-        }
-        _path_skipped[_pathid] = false;
+    //     while (_path_qualities[_pathid] > upperquartile &&  _path_qualities[_pathid] > average + 2 * sd) { // if path was skipped, should give it another try?
+    //         // cout << "bad path " << _pathid << endl;
+    //         _path_skipped[_pathid] = true;
+    //         _path_qualities[_pathid] =  0.125 + 0.75 * _path_qualities[_pathid]; // this way, if you get an ECN mark every time you try it, that is worse than getting an ECN mark half of the time
+    //         _pathid = (_pathid + 1) % _ev_count;
+    //     }
+    //     _path_skipped[_pathid] = false;
         
-    }
+    // }
 }
 
 void

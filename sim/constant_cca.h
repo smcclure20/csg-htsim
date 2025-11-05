@@ -16,6 +16,7 @@
 #include "constant_cca_packet.h"
 #include "constant_cca_scheduler.h"
 #include "ecn.h"
+#include "uec_mp.h"
 
 //#define MODEL_RECEIVE_WINDOW 1
 
@@ -97,8 +98,16 @@ public:
     inline bool spraying() const {return _spraying;}
     bool _adaptive;
     void set_adaptive() {_adaptive = true;}
-    inline bool adaptive() const {return _adaptive;}
+    inline bool adaptive() const {return _adaptive;} //TODO: Update this to use REPS!
     int _ev_count;
+
+    // bitmap sack
+    bool _sack;
+    void set_sack() {_sack = true;}
+    inline bool sack() const {return _sack;}
+    int _ooo_limit;
+    void set_ooo_limit(int limit) {_ooo_limit = limit;}
+    inline int ooo_limit() {return _ooo_limit;}
 
 
     // should really be private, but loggers want to see:
@@ -196,6 +205,12 @@ public:
     uint16_t _mss;
     uint16_t mss() const {return _mss;}
 
+    // PLB & REPS stuff
+    UecMpReps _uec_mp = UecMpReps(8, false, true);
+    // timeouts for plb
+    simtime_picosec _oldest_sent;
+    uint32_t _oldest_pathid;
+
 protected:
     // connection state
     bool _established;
@@ -231,6 +246,8 @@ protected:
     // Adaptive spraying stuff
     std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
     std::vector<bool> _path_skipped;
+
+    simtime_picosec _last_sack_update = timeInf;
 
     uint32_t _drops;
     simtime_picosec _RFC2988_RTO_timeout;
@@ -292,6 +309,8 @@ public:
     uint32_t drops() {return _drops;}
     uint32_t _nacks_sent;
     uint32_t nacks_sent() { return _nacks_sent; }
+
+    uint64_t _bitmap;
 
     set<ConstantCcaAck::seq_t> _received; 
     virtual const string& nodename() { return _nodename; }

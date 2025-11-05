@@ -20,7 +20,7 @@ ConstantCcaPacer::schedule_send(simtime_picosec delay) {
     // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
     simtime_picosec previous_next_send = _next_send;
-    simtime_picosec new_next_send = _last_send + _interpacket_delay + rand() % (_interpacket_delay/10);
+    simtime_picosec new_next_send = _last_send + _interpacket_delay; //+ rand() % (_interpacket_delay/10);
     if (new_next_send <= eventlist().now()) {
         // Tricky!  We're going in to pacing mode, but it's more than
         // the pacing delay since we last sent.  Presumably the best
@@ -251,10 +251,7 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
         send_packets();
         return;
     }
-    if (_src._fr_disabled) {
-        // fast recovery disabled
-        return;
-    }
+
     // It's a dup ack
     _total_dupacks++;
     if (_in_fast_recovery) { // still in fast recovery; hopefully the prodigal ACK is on it's way
@@ -269,6 +266,11 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
     }
     // Not yet in fast recovery. What should we do instead?
     _dupacks++;
+
+    if (_src._fr_disabled) {
+        // fast recovery disabled
+        return;
+    }
 
     if (_dupacks!=_src._dupack_threshold)  { // not yet serious worry
         send_packets();
@@ -386,6 +388,10 @@ ConstantCcaSubflowSrc::send_next_packet() {
         return false;
     }
 
+    if (_src.adaptive()) {
+        _pathid = _uec_mp.nextEntropy(seqno, 0); // current_cwnd is unused
+    }
+
     ConstantCcaPacket::seq_t dsn;
     if (!_dsn_map.empty() && _dsn_map.count(_highest_sent + 1) > 0) {
         dsn = _dsn_map[_highest_sent+1];
@@ -412,6 +418,18 @@ ConstantCcaSubflowSrc::send_next_packet() {
 
     if (_src.spraying()) { // switch path on every packet
         move_path_flow_label();
+    }
+
+    if(_oldest_sent == timeInf) {
+        _oldest_sent = eventlist().now();
+        _oldest_pathid = _pathid;
+    } 
+    else if (_src.plb() && eventlist().now() - _oldest_sent > _rto) { // If no packets have gotten through, reroute
+        _last_good_path = eventlist().now();
+        move_path_flow_label();
+        _oldest_sent = eventlist().now();
+    } else if (_src.adaptive() && eventlist().now() - _oldest_sent > _rto) {
+        _uec_mp.processEv(_oldest_pathid, UecMultipath::PATH_TIMEOUT); // THis is not the right path id! 
     }
 
     return true;
@@ -528,6 +546,26 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         p->free();
         return;
     }
+
+    if (_src.sack()) {
+        uint64_t bitmap = p->bitmap();
+        if (bitmap != 0 && (ackno == _last_acked && _dupacks ==_src._dupack_threshold) ) { // (eventlist().now() - _last_sack_update) > _rtt && 
+            // std::cout << "bitmap: " << std::hex << bitmap << std::endl;
+            int last_one = 64 - log2(bitmap & -bitmap); // note: first 0 should always be in the first spot (otherwise, should have shifted left )
+            // std::cout << "last one: " << last_one << std::endl;
+            if (last_one > _src.ooo_limit()) {
+                // retransmit all missing 
+                int index = 0;
+                while (index < (last_one - _src.ooo_limit())) {
+                    if ((bitmap & (1 << (64-index))) == 0) {
+                        retransmit_packet(ackno + index * mss());
+                    }
+                    index++;
+                }
+                _last_sack_update = eventlist().now();
+            }
+        }
+    }
   
   
     ts_echo = p->ts_echo();
@@ -586,9 +624,10 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         }
     }
     if (_src.adaptive()) {
-        bool ecn_mark = pkt.flags() & ECN_CE;
-        _path_qualities[pathid] = (ecn_mark * 0.25) + (_path_qualities[pathid] * 0.75);// (high is bad)
-        // _path_qualities[_pathid] = (delay * 0.25) + (_path_qualities[_pathid] * 0.75); // can also do this based on ecn
+        UecMultipath::PathFeedback feedback = pkt.flags() & ECN_CE ? UecMultipath::PATH_ECN : UecMultipath::PATH_GOOD;
+        _uec_mp.processEv(pathid, feedback);
+        // bool ecn_mark = pkt.flags() & ECN_CE;
+        // _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
     }
 
     _src.update_dsn_ack(ds_ackno);
@@ -694,18 +733,18 @@ void
 ConstantCcaSubflowSrc::move_path_flow_label() {
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
     _pathid++;
-    if (_src.adaptive()) {
-        _pathid = _pathid % _src._ev_count;
-        double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
-        double average = sum / _path_qualities.size();
-        if (_path_qualities[_pathid] > average) {
-            // cout << "bad path " << _pathid << endl;
-            _pathid = (_pathid + 1) % _src._ev_count;
-            _path_skipped[_pathid] = true;
-        } else {
-            _path_skipped[_pathid] = false;
-        }
-    }
+    // if (_src.adaptive()) {
+    //     _pathid = _pathid % _src._ev_count;
+    //     double sum = std::accumulate(_path_qualities.begin(), _path_qualities.end(), 0.0);
+    //     double average = sum / _path_qualities.size();
+    //     if (_path_qualities[_pathid] > average) {
+    //         // cout << "bad path " << _pathid << endl;
+    //         _pathid = (_pathid + 1) % _src._ev_count;
+    //         _path_skipped[_pathid] = true;
+    //     } else {
+    //         _path_skipped[_pathid] = false;
+    //     }
+    // }
 }
 
 void
@@ -996,6 +1035,7 @@ ConstantCcaSubflowSink::ConstantCcaSubflowSink(ConstantCcaSink& sink)
     _spurious_retransmits = 0;
     _drops = 0;
     _nacks_sent = 0;
+    _bitmap = 0;
     _subflow_src = NULL;
     _nodename = "constantccasubflowsink";
 }
@@ -1032,10 +1072,12 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
     uint32_t seqno = p->seqno();
     if (seqno == _cumulative_ack+1) { // it's the next expected seq no
         _cumulative_ack = seqno + size - 1;
+        _bitmap = _bitmap << 1;
         // are there any additional received packets we can now ack?
         while (!_received.empty() && (*(_received.begin()) == _cumulative_ack+1) ) {
             _received.erase(_received.begin());
             _cumulative_ack += size;
+            _bitmap = _bitmap << 1;
         }
     } else if (seqno < _cumulative_ack+1) {
         // it is before the next expected sequence - must be a spurious retransmit.
@@ -1045,6 +1087,11 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
     } else {
         // it's not the next expected sequence number
         _received.insert(seqno);
+        int shift = (seqno - _cumulative_ack + 1) / size;
+        uint64_t shifted = ((uint64_t)1 << 63) >> shift;
+        _bitmap = _bitmap | shifted;
+
+        // std::cout << "_bitmap: " << std::hex << _bitmap << std::endl;
     }
 
     _sink.receivePacket(pkt);
@@ -1062,7 +1109,7 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
 void 
 ConstantCcaSubflowSink::send_ack(simtime_picosec ts, uint32_t ack_dst, uint32_t ack_src, uint32_t pathid) {
     const Route* rt = _route;
-    ConstantCcaAck *ack = ConstantCcaAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src, pathid);
+    ConstantCcaAck *ack = ConstantCcaAck::newpkt(_subflow_src->flow(), *rt, 0, _cumulative_ack, _sink._cumulative_data_ack, ts, ack_dst, ack_src, pathid, _bitmap);
 
     ack->sendOn();
 }
