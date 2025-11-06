@@ -29,6 +29,9 @@ typedef enum {UPLINK, DOWNLINK} link_direction;
 #define AGG_TIER 1
 #define CORE_TIER 2
 
+typedef enum {BLACK_HOLE_DROP, BLACK_HOLE_QUEUE} FailType;
+
+
 class FatTreeTopology: public Topology{
 public:
     vector <Switch*> switches_lp;
@@ -121,6 +124,12 @@ public:
     void set_weighted(bool weighted) {_weighted = weighted;}
 
     void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+    void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id, FailType failure_type);
+    void restore_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+    void update_routes(uint32_t switch_id);
+    void update_weights(uint32_t switch_id, vector<int> link_weights, vector<int> destinations); // assumes only TORs for now
+    void update_weights_tor_podfailed(int failed_pod);
+    void update_weights_tor_otherpod(int failed_pod);
 
     void add_symmetric_failures(int failures);
 
@@ -149,6 +158,17 @@ public:
             // only one pod in leaf-spine
             return 0;
     }
+
+    uint32_t MIN_POD_HOST(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return pod_id * _hosts_per_pod;
+    }
+
+    uint32_t MAX_POD_HOST(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return (pod_id + 1) * _hosts_per_pod - 1;
+    }
+
     /*
     uint32_t MIN_POD_ID(uint32_t pod_id){
         if (_tiers == 2) assert(pod_id == 0);

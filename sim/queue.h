@@ -50,6 +50,8 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
     virtual const string& nodename() { return _nodename; }
     virtual mem_b queuesize() const = 0;
     virtual mem_b maxsize() const = 0;
+
+    void changeRate(linkspeed_bps rate) { _ps_per_byte = (simtime_picosec)((pow(10.0, 12.0) * 8) / _bitrate);} // NOTE: this should generally not be used. only exposed for failures
     
     inline simtime_picosec drainTime(Packet *pkt) { 
             return (simtime_picosec)(pkt->size() * _ps_per_byte); 
@@ -115,6 +117,10 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
 
     bool checkBurstyLoss();
 
+    void setFailed (bool failed) { _failed = failed;}
+
+    bool getFailed() {return _failed;}
+
 
 protected:
     // Housekeeping
@@ -148,6 +154,7 @@ protected:
     std::exponential_distribution<> _burst_duration;
     simtime_picosec _burst_end = 0;
     bool _drop_all = false; // used for when BW is 0%
+    bool _failed = false;
 };
 
 

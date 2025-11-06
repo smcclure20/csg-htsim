@@ -311,6 +311,72 @@ void FatTreeSwitch::permute_paths(vector<FibEntry *>* uproutes) {
     }
 }
 
+map<uint32_t, BaseQueue*> FatTreeSwitch::getUpPorts() {
+    map<uint32_t, BaseQueue*> up_ports = {};
+    if (_type == TOR) {
+        uint32_t podid,agg_min,agg_max;
+
+        if (_ft->get_tiers()==3) {
+            podid = _id / _ft->tor_switches_per_pod();
+            agg_min = _ft->MIN_POD_AGG_SWITCH(podid);
+            agg_max = _ft->MAX_POD_AGG_SWITCH(podid);
+        }
+        else {
+            agg_min = 0;
+            agg_max = _ft->getNAGG()-1;
+        }
+
+        for (uint32_t k=agg_min; k<=agg_max;k++){
+            for (uint32_t b = 0; b < _ft->bundlesize(AGG_TIER); b++) {
+                up_ports[k] = _ft->queues_nlp_nup[_id][k][b];
+                
+            }
+        }
+    } else if (_type == AGG) {
+        uint32_t podpos = _id % _ft->agg_switches_per_pod();
+        uint32_t uplink_bundles = _ft->radix_up(AGG_TIER) / _ft->bundlesize(CORE_TIER);
+        for (uint32_t l = 0; l <  uplink_bundles ; l++) {
+            uint32_t core = l * _ft->agg_switches_per_pod() + podpos;
+
+            for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
+                up_ports[core] =_ft->queues_nup_nc[_id][core][b];
+            }
+        }
+    }
+    return up_ports;
+}
+
+int FatTreeSwitch::countActiveUpPorts() {
+    map<uint32_t, BaseQueue*> up_ports = getUpPorts();
+    int count = 0;
+    for (map<uint32_t, BaseQueue*>::iterator it = up_ports.begin(); it != up_ports.end(); ++it) {
+        if (it->second == NULL || it->second->getFailed()) {
+            continue;
+        }
+        count++;
+    } 
+    return count;
+}
+
+int FatTreeSwitch::countActiveRoutesToPod(int pod) {
+    assert(_type == AGG);
+    int count = 0;
+    uint32_t podpos = _id % _ft->agg_switches_per_pod();
+    uint32_t uplink_bundles = _ft->radix_up(AGG_TIER) / _ft->bundlesize(CORE_TIER);
+    for (uint32_t l = 0; l <  uplink_bundles ; l++) {
+        uint32_t core = l * _ft->agg_switches_per_pod() + podpos;
+        uint32_t dst_agg =  _ft->MIN_POD_AGG_SWITCH(pod)   + podpos;
+        for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
+            // Check if the link between the core switch and the destination AGG switch is up
+            if (_ft->queues_nc_nup[core][dst_agg][b] == NULL || _ft->queues_nc_nup[core][dst_agg][b]->getFailed()) {
+                continue;
+            }
+            count++;
+        }
+    }
+    return count;
+}
+
 FatTreeSwitch::routing_strategy FatTreeSwitch::_strategy = FatTreeSwitch::NIX;
 uint16_t FatTreeSwitch::_ar_fraction = 0;
 uint16_t FatTreeSwitch::_ar_sticky = FatTreeSwitch::PER_PACKET;
@@ -408,6 +474,7 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             return fe->getEgressPort();
         } else {
             //route packet up!
+            _up_destinations.push_back(pkt.dst());
             if (_uproutes) // this avoids calculating the uproutes for all destinations (can keep for now since no failures on ToR uplinks)
                 _fib->setRoutes(pkt.dst(),_uproutes);
             else {
@@ -435,7 +502,7 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     }
                 }
                 _uproutes = _fib->getRoutes(pkt.dst());
-                permute_paths(_uproutes);
+                // permute_paths(_uproutes);
             }
         }
     } else if (_type == AGG) {
@@ -455,21 +522,22 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             }
         } else {
             //go up!
+            _up_destinations.push_back(pkt.dst());
             
             uint32_t podpos = _id % _ft->agg_switches_per_pod();
             uint32_t uplink_bundles = _ft->radix_up(AGG_TIER) / _ft->bundlesize(CORE_TIER);
             for (uint32_t l = 0; l <  uplink_bundles ; l++) {
                 uint32_t core = l * _ft->agg_switches_per_pod() + podpos;
                 uint32_t dst_agg =  _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(pkt.dst()))   + podpos;
-                // Check if the link between the core switch and the destination AGG switch is up TODO: make this general. Add a method to fattreetop to check if a down path is up
-                if (_ft->queues_nc_nup[core][dst_agg][0] == NULL) {
-                    continue;
-                }
-                // Check if the link between this switch and the core is up
-                if (_ft->queues_nup_nc[_id][core][0] == NULL) {
-                    continue;
-                }
                 for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
+                    // Check if the link between the core switch and the destination AGG switch is up TODO: make this general. Add a method to fattreetop to check if a down path is up
+                    if (_ft->queues_nc_nup[core][dst_agg][b] == NULL || _ft->queues_nc_nup[core][dst_agg][b]->getFailed()) {
+                        continue;
+                    }
+                    // Check if the link between this switch and the core is up
+                    if (_ft->queues_nup_nc[_id][core][b] == NULL || _ft->queues_nc_nup[_id][core][b]->getFailed()) { 
+                        continue;
+                    }
                     Route *r = new Route();
                     r->push_back(_ft->queues_nup_nc[_id][core][b]);
                     assert(((BaseQueue*)r->at(0))->getSwitch() == this);
@@ -486,6 +554,10 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
     } else if (_type == CORE) { 
         uint32_t nup = _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(pkt.dst())) + (_id % _ft->agg_switches_per_pod());
         for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
+            // Do not add the route if the link is down
+            if (_ft->queues_nc_nup[_id][nup][b] == NULL || _ft->queues_nc_nup[_id][nup][b]->getFailed()) {
+                continue;
+            }
 
             Route *r = new Route();
             // cout << "CORE switch " << _id << " adding route to " << pkt.dst() << " via AGG " << nup << endl;

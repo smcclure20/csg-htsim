@@ -131,6 +131,13 @@ public:
     static simtime_picosec _sticky_delta;
     static double _ecn_threshold_fraction;
     static double _speculative_threshold_fraction;
+
+    vector<FibEntry*>* getUproutes() {return _uproutes;}
+    vector<int> getUpDestinations() {return _up_destinations;}
+    map<uint32_t, BaseQueue*> getUpPorts();
+    int countActiveUpPorts();
+    int countActiveRoutesToPod(int pod);
+
 private:
     switch_type _type;
     Pipe* _pipe;
@@ -138,6 +145,7 @@ private:
     
     //CAREFUL: can't always have a single FIB for all up destinations when there are failures!
     vector<FibEntry*>* _uproutes;
+    vector<int> _up_destinations;
 
     unordered_map<uint32_t,FlowletInfo*> _flowlet_maps;
 
