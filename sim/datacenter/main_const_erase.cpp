@@ -9,7 +9,7 @@
 #include "randomqueue.h"
 #include "shortflows.h"
 #include "pipe.h"
-#include "eventlist.h"
+#include "eventlist.h" 
 #include "logfile.h"
 #include "loggers.h"
 #include "clock.h"
@@ -21,6 +21,7 @@
 //#include "vl2_topology.h"
 
 #include "fat_tree_topology.h"
+#include "failure_manager.h"
 //#include "generic_topology.h"
 //#include "oversubscribed_fat_tree_topology.h"
 //#include "multihomed_fat_tree_topology.h"
@@ -75,7 +76,15 @@ int main(int argc, char **argv) {
     HostLBStrategy host_lb = NOLB;
     int link_failures = 0;
     double failure_pct = 0.1; // failed links have 10% bandwidth
+    FailType failure_type = BLACK_HOLE_DROP;
+    bool binary_failure = false;
+    int binary_failures_per_pod = 0;
+    simtime_picosec fail_time = timeInf;
+    simtime_picosec route_recovery_time = timeInf;
+    simtime_picosec weight_recovery_time = timeInf;
+    FailureManager* failure_manager = NULL;
     int plb_ecn = 0;
+    double ecn_thres = 0.6;
     queue_type queue_type = ECN;
     double rate_coef = 1.0;
     bool rts = false;
@@ -134,8 +143,26 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-failpct")){
             failure_pct = stod(argv[i+1]);
             i++;
-        }  else if (!strcmp(argv[i],"-plbecn")){
+        }  else if (!strcmp(argv[i],"-ftype")){
+            if (!strcmp(argv[i+1], "drop")) {
+                failure_type = BLACK_HOLE_DROP;
+            }else if (!strcmp(argv[i+1], "queue")) {
+                failure_type = BLACK_HOLE_QUEUE;
+            } else {
+                exit_error(argv[0]);
+            }
+            i++;
+        }  else if (!strcmp(argv[i],"-ftime")){
+            fail_time = atoi(argv[i+1]);
+            route_recovery_time = atoi(argv[i+2]);
+            weight_recovery_time = atoi(argv[i+3]);
+            i+=3;
+        }else if (!strcmp(argv[i],"-plbecn")){
             plb_ecn = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-ecnthres")){
+            ecn_thres = atoi(argv[i+1]);
+            FatTreeSwitch::set_ecn_threshold(ecn_thres);
             i++;
         } else if (!strcmp(argv[i],"-trim")){ // TODO: Get rid of these parameters which would be incoherent in this setting
             queue_type = COMPOSITE_ECN;
@@ -196,6 +223,12 @@ int main(int argc, char **argv) {
         }
         i++;
     }
+    if (failure_pct == -1.0) {  // signifies failure that is routed around (vs. still in route tables with 0.0)
+        binary_failure = true; 
+        binary_failures_per_pod = link_failures;
+        link_failures = 0;
+    }
+    
     Packet::set_packet_size(packet_size);
     eventlist.setEndtime(endtime);
 
@@ -218,72 +251,41 @@ int main(int argc, char **argv) {
         cout << "Can't open for writing flow log file!"<<endl;
         exit(1);
     }
-
-#if PRINT_PATHS
-    filename << ".paths";
-    cout << "Logging path choices to " << filename.str() << endl;
-    std::ofstream paths(filename.str().c_str());
-    if (!paths){
-        cout << "Can't open for writing paths file!"<<endl;
-        exit(1);
-    }
-#endif
     
     ConstantErasureCcaSrc* sender;
     ConstantErasureCcaSink* sink;
 
     Route* routeout, *routein;
    
-#ifdef FAT_TREE
+
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+                                                NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
     // if (flaky_links > 0) {
     //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
     // }
-#endif
-
-#ifdef OV_FAT_TREE
-    OversubscribedFatTreeTopology* top = new OversubscribedFatTreeTopology(lg, &eventlist,ff);
-#endif
-
-#ifdef MH_FAT_TREE
-    MultihomedFatTreeTopology* top = new MultihomedFatTreeTopology(lg, &eventlist,ff);
-#endif
-
-#ifdef STAR
-    StarTopology* top = new StarTopology(lg, &eventlist,ff);
-#endif
-
-#ifdef BCUBE
-    BCubeTopology* top = new BCubeTopology(lg,&eventlist,ff,COMPOSITE_PRIO);
-    cout << "BCUBE " << K << endl;
-#endif
-
-#ifdef VL2
-    VL2Topology* top = new VL2Topology(lg,&eventlist,ff);
-#endif
-
-#ifdef GENERIC_TOPO
-    GenericTopology *top = new GenericTopology(lg, &eventlist);
-    if (topo_file) {
-        top->load(topo_file);
+    if (binary_failure) {
+        failure_manager = new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type);
+        failure_manager->setFailedLink(FatTreeSwitch::AGG, 0, 0);
+        // top->add_failed_link(FatTreeSwitch::AGG, 0, 0, failure_type);
+        // top->add_symmetric_failures(binary_failures_per_pod);
     }
-#endif
+    
+
     
     no_of_nodes = top->no_of_nodes();
     cout << "actual nodes " << no_of_nodes << endl;
 
-    vector<const Route*>*** net_paths;
-    net_paths = new vector<const Route*>**[no_of_nodes];
+    // vector<const Route*>*** net_paths;
+    // net_paths = new vector<const Route*>**[no_of_nodes];
 
-    int* is_dest = new int[no_of_nodes];
+    // int* is_dest = new int[no_of_nodes];
     
-    for (uint32_t i=0; i<no_of_nodes; i++){
-        is_dest[i] = 0;
-        net_paths[i] = new vector<const Route*>*[no_of_nodes];
-        for (uint32_t j = 0; j<no_of_nodes; j++)
-            net_paths[i][j] = NULL;
-    }
+    // for (uint32_t i=0; i<no_of_nodes; i++){
+    //     is_dest[i] = 0;
+    //     net_paths[i] = new vector<const Route*>*[no_of_nodes];
+    //     for (uint32_t j = 0; j<no_of_nodes; j++)
+    //         net_paths[i][j] = NULL;
+    // }
 
     // Permutation connections
     ConnectionMatrix* conns = new ConnectionMatrix(no_of_nodes);
@@ -323,17 +325,17 @@ int main(int argc, char **argv) {
         uint32_t dest = crt->dst;
         
         connID++;
-        if (!net_paths[src][dest]) {
-            vector<const Route*>* paths = top->get_paths(src,dest);
-            net_paths[src][dest] = paths;
-            for (uint32_t p = 0; p < paths->size(); p++) {
-                routes.push_back((*paths)[p]);
-            }
-        }
-        if (!net_paths[dest][src]) {
-            vector<const Route*>* paths = top->get_paths(dest,src);
-            net_paths[dest][src] = paths;
-        }
+        // if (!net_paths[src][dest]) {
+        //     vector<const Route*>* paths = top->get_paths(src,dest);
+        //     net_paths[src][dest] = paths;
+        //     for (uint32_t p = 0; p < paths->size(); p++) {
+        //         routes.push_back((*paths)[p]);
+        //     }
+        // }
+        // if (!net_paths[dest][src]) {
+        //     vector<const Route*>* paths = top->get_paths(dest,src);
+        //     net_paths[dest][src] = paths;
+        // }
 
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
         simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
@@ -369,74 +371,13 @@ int main(int argc, char **argv) {
         if (route_strategy != SOURCE_ROUTE) {
             routeout = top->get_tor_route(src);
             routein = top->get_tor_route(dest);
-        } else {
-            uint32_t choice = 0;
-          
-#ifdef FAT_TREE
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef OV_FAT_TREE
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef MH_FAT_TREE
-            int use_all = it_sub==net_paths[src][dest]->size();
-
-            if (use_all)
-                choice = inter;
-            else
-                choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef VL2
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef STAR
-            choice = 0;
-#endif
-          
-#ifdef BCUBE
-            //choice = inter;
-            
-            int min = -1, max = -1,minDist = 1000,maxDist = 0;
-            if (subflow_count==1){
-                //find shortest and longest path 
-                for (uint32_t dd=0;dd<net_paths[src][dest]->size();dd++){
-                    if (net_paths[src][dest]->at(dd)->size()<minDist){
-                        minDist = net_paths[src][dest]->at(dd)->size();
-                        min = dd;
-                    }
-                    if (net_paths[src][dest]->at(dd)->size()>maxDist){
-                        maxDist = net_paths[src][dest]->at(dd)->size();
-                        max = dd;
-                    }
-                }
-                choice = min;
-            } 
-            else
-                choice = rand()%net_paths[src][dest]->size();
-#endif
-            if (choice>=net_paths[src][dest]->size()){
-                printf("Weird path choice %d out of %lu\n",choice,net_paths[src][dest]->size());
-                exit(1);
-            }
-          
-#if PRINT_PATHS
-            for (uint32_t ll=0;ll<net_paths[src][dest]->size();ll++){
-                paths << "Route from "<< ntoa(src) << " to " << ntoa(dest) << "  (" << ll << ") -> " ;
-                print_path(paths,net_paths[src][dest]->at(ll));
-            }
-#endif
-          
-            routeout = new Route(*(net_paths[src][dest]->at(choice)));
-            //routeout->push_back(swiftSnk);
-            
-            routein = new Route(*top->get_paths(dest,src)->at(choice));
-            //routein->push_back(swiftSrc);
+        } 
+        else {
+            printf("Source routing not currently supported");
+            exit(1);
         }
-
+        
+        
         // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
         // simtime_picosec starttime = crt->start + offset;
         // cout << "starttime " << timeAsUs(starttime) << endl;
@@ -477,47 +418,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    cout << "Done" << endl;
-
-#if PRINT_PATHS
-    list <const Route*>::iterator rt_i;
-    int counts[10]; int hop;
-    for (rt_i = routes.begin(); rt_i != routes.end(); rt_i++) {
-        const Route* r = (*rt_i);
-        //print_route(*r);
-        cout << "Path:" << endl;
-        for (uint32_t i = 0; i < r->size(); i++) {
-            PacketSink *ps = r->at(i); 
-            CompositeQueue *q = dynamic_cast<CompositeQueue*>(ps);
-            if (q == 0) {
-                cout << ps->nodename() << endl;
-            } else {
-                cout << q->nodename() << " id=" << q->get_id() << " " << q->num_packets() << "pkts " 
-                     << q->num_headers() << "hdrs " << q->num_acks() << "acks " << q->num_nacks() << "nacks " << q->num_stripped() << "stripped"
-                     << endl;
-            }
-        } 
-        cout << endl;
-    }
-    for (uint32_t ix = 0; ix < 10; ix++)
-        counts[ix] = 0;
-    for (rt_i = routes.begin(); rt_i != routes.end(); rt_i++) {
-        const Route* r = (*rt_i);
-        //print_route(*r);
-        hop = 0;
-        for (uint32_t i = 0; i < r->size(); i++) {
-            PacketSink *ps = r->at(i); 
-            CompositeQueue *q = dynamic_cast<CompositeQueue*>(ps);
-            if (q == 0) {
-            } else {
-                counts[hop] += q->num_stripped();
-                q->_num_stripped = 0;
-                hop++;
-            }
-        } 
-        cout << endl;
-    }
-#endif    
+    cout << "Done" << endl; 
 
     /*for (uint32_t i = 0; i < 10; i++)
         cout << "Hop " << i << " Count " << counts[i] << endl; */
@@ -542,22 +443,4 @@ int main(int argc, char **argv) {
             cout << "Src, sent: " << counterpart_src->_packets_sent << "; ACKED " << counterpart_src->packets_acked() << endl;
         }
     }
-    /*
-    uint64_t total_rtt = 0;
-    cout << "RTT Histogram";
-    for (uint32_t i = 0; i < 100000; i++) {
-        if (SwiftSrc::_rtt_hist[i]!= 0) {
-            cout << i << " " << SwiftSrc::_rtt_hist[i] << endl;
-            total_rtt += SwiftSrc::_rtt_hist[i];
-        }
-    }
-    cout << "RTT CDF";
-    uint64_t cum_rtt = 0;
-    for (uint32_t i = 0; i < 100000; i++) {
-        if (SwiftSrc::_rtt_hist[i]!= 0) {
-            cum_rtt += SwiftSrc::_rtt_hist[i];
-            cout << i << " " << double(cum_rtt)/double(total_rtt) << endl;
-        }
-    }
-    */
 }
