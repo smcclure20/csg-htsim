@@ -39,8 +39,8 @@ htsim_constcca: main_const.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_to
 htsim_constcca_old: main_const_old.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o
 	$(CC) $(CFLAGS) firstfit.o main_const_old.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o $(LIB) -lhtsim -o htsim_constcca_old
 
-htsim_consterase: main_const_erase.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o
-	$(CC) $(CFLAGS) firstfit.o main_const_erase.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o $(LIB) -lhtsim -o htsim_consterase
+htsim_consterase: main_const_erase.o firstfit.o ../libhtsim.a vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o multihomed_fat_tree_topology.o star_topology.o generic_topology.o failure_manager.o
+	$(CC) $(CFLAGS) firstfit.o main_const_erase.o vl2_topology.o fat_tree_topology.o fat_tree_switch.o bcube_topology.o connection_matrix.o oversubscribed_fat_tree_topology.o shortflows.o star_topology.o multihomed_fat_tree_topology.o generic_topology.o failure_manager.o $(LIB) -lhtsim -o htsim_consterase
 
 main_tcp.o: main_tcp.cpp ${DEPS}
 	$(CC) $(INCLUDE) $(CFLAGS) -c main_tcp.cpp
@@ -113,6 +113,9 @@ multihomed_fat_tree_topology.o: multihomed_fat_tree_topology.cpp multihomed_fat_
 
 fat_tree_switch.o: fat_tree_switch.h fat_tree_switch.cpp ${DEPS}
 	$(CC) $(INCLUDE) $(CFLAGS) -c fat_tree_switch.cpp
+
+failure_manager.o: failure_manager.h failure_manager.cpp ${DEPS}
+	$(CC) $(INCLUDE) $(CFLAGS) -c failure_manager.cpp
 
 main_eqds.o: main_eqds.cpp
 	$(CC) $(INCLUDE) $(CFLAGS) -c main_eqds.cpp 

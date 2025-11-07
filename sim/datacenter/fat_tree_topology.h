@@ -32,7 +32,7 @@ typedef enum {UPLINK, DOWNLINK} link_direction;
 typedef enum {BLACK_HOLE_DROP, BLACK_HOLE_QUEUE} FailType;
 
 
-class FatTreeTopology: public Topology{
+class FatTreeTopology: public Topology {
 public:
     vector <Switch*> switches_lp;
     vector <Switch*> switches_up;
@@ -203,6 +203,8 @@ public:
     
     //uint32_t getK() const {return K;}
     uint32_t getNAGG() const {return NAGG;}
+
+    void activate();
 private:
     map<Queue*,int> _link_usage;
     static FatTreeTopology* load(istream& file, QueueLoggerFactory* logger_factory, EventList& eventlist,
