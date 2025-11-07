@@ -57,3 +57,7 @@ void Switch::add_logger(Logfile& log, simtime_picosec sample_period) {
         _ports.at(i)->setLogger(queue_logger);
     }
 }
+
+void Switch::resetFib() {
+    _fib = new RouteTable();
+}

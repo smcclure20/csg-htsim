@@ -1120,7 +1120,8 @@ void FatTreeTopology::update_weights(uint32_t switch_id, vector<int> link_weight
     // vector<int> up_dests = ((FatTreeSwitch*) switch_up)->getUpDestinations();
     for (int dst : destinations) { 
         vector<FibEntry*>* uproutes = fib->getRoutes(dst);
-        fib->setRoutes(dst, &vector<FibEntry*> {});
+        vector<FibEntry*>* emptyRoutes = {};
+        fib->setRoutes(dst, emptyRoutes);
         int i = 0;
         for (FibEntry* route : *uproutes) {
             fib->addRoute(dst, route->getEgressPort(), link_weights[i], route->getDirection());
