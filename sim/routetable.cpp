@@ -8,20 +8,22 @@
 void RouteTable::addRoute(int destination, Route* port, int cost, packet_direction direction){  
     if (_fib.find(destination) == _fib.end())
         _fib[destination] = new vector<FibEntry*>(); 
-
-    if (_weighted && (_weighted_fib.find(destination) == _weighted_fib.end()))
-        _weighted_fib[destination] = new vector<FibEntry*>(); 
     
     assert(port!=NULL);
 
     _fib[destination]->push_back(new FibEntry(port,cost,direction));
+}
 
-    if (_weighted) {
-        for (int i = 0; i < cost; i++) { // leveraging cost because I think it is otherwise unused -- todo check
-            _weighted_fib[destination]->push_back(new FibEntry(port,cost,direction));
-        }
+void RouteTable::addWeightedRoute(int destination, Route* port, int cost, packet_direction direction, int weight){  
+    if (!_weighted) {
+        return;
     }
+    if (_weighted_fib.find(destination) == _weighted_fib.end())
+        _weighted_fib[destination] = new vector<FibEntry*>(); 
+    
+    assert(port!=NULL);
 
+    _weighted_fib[destination]->push_back(new FibEntry(port,cost,direction));
 }
 
 void RouteTable::addHostRoute(int destination, Route* port, int flowid){  
@@ -61,4 +63,16 @@ HostFibEntry* RouteTable::getHostRoute(int destination,int flowid){
 
 void RouteTable::setRoutes(int destination, vector<FibEntry*>* routes){
     _fib[destination] = routes;
+}
+
+void RouteTable::clearRoutes() {
+    _fib.clear();
+}
+
+vector<int> RouteTable::getDestinations() {
+    vector<int> dsts = vector<int> {};
+    for (unordered_map<int,vector<FibEntry*>* >::const_iterator it = _fib.begin(); it != _fib.end(); ++it) {
+        dsts.push_back(it->first);
+    }
+    return dsts;
 }

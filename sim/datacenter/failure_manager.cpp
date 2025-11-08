@@ -34,16 +34,17 @@ void FailureManager::doNextEvent() {
             _ft->update_routes(_switch_id);
             _routes_updated = true;
             uint32_t podpos = _switch_id % _ft->agg_switches_per_pod();
-            for (int p = 0; p < _ft->no_of_pods(); p++) {
-                uint32_t agg =  p  + podpos; 
+            for (uint32_t p = 0; p < _ft->no_of_pods(); p++) {
+                uint32_t agg =  (p * _ft->agg_switches_per_pod())  + podpos; 
                 _ft->update_routes(agg);
             }
         }
-        if (!_weights_updated && _eventlist.now() > _weight_update_time) {
+        if (!_weights_updated && _eventlist.now() >= _weight_update_time) {
             std::cout << "Updating weights " << _eventlist.now() << std::endl;
-            _weights_updated = true;
+            
             _ft->update_weights_tor_otherpod(_switch_id % _ft->agg_switches_per_pod());
             _ft->update_weights_tor_podfailed(_switch_id % _ft->agg_switches_per_pod());
+            _weights_updated = true;
         }
     }
 }

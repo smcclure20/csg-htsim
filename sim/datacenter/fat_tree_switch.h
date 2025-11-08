@@ -132,11 +132,16 @@ public:
     static double _ecn_threshold_fraction;
     static double _speculative_threshold_fraction;
 
-    vector<FibEntry*>* getUproutes() {return _uproutes;}
+    vector<FibEntry*>* getUproutes();
     vector<int> getUpDestinations() {return _up_destinations;}
     map<uint32_t, BaseQueue*> getUpPorts();
     int countActiveUpPorts();
     int countActiveRoutesToPod(int pod);
+    void forcePopulateRoutes();
+    void addRoute(uint32_t dst);
+    void setWeights(map<string,int> weights) {_switch_weights=weights;}
+    map<string,int> getWeights() { return _switch_weights;}
+    void applyWeights();
 
 private:
     switch_type _type;
@@ -156,6 +161,8 @@ private:
     simtime_picosec _last_choice;
 
     unordered_map<Packet*,bool> _packets;
+
+    map<string,int> _switch_weights;
 };
 
 #endif

@@ -58,6 +58,9 @@ void Switch::add_logger(Logfile& log, simtime_picosec sample_period) {
     }
 }
 
-void Switch::resetFib() {
-    _fib = new RouteTable();
+void Switch::resetFib(bool checkpoint) {
+    if (checkpoint) {
+        _old_fib = _fib->copy();
+    }
+   _fib->clearRoutes();
 }

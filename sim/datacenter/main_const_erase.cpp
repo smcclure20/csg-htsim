@@ -153,9 +153,9 @@ int main(int argc, char **argv) {
             }
             i++;
         }  else if (!strcmp(argv[i],"-ftime")){
-            fail_time = atoi(argv[i+1]);
-            route_recovery_time = atoi(argv[i+2]);
-            weight_recovery_time = atoi(argv[i+3]);
+            fail_time = timeFromUs(atof(argv[i+1]));
+            route_recovery_time = timeFromUs(atof(argv[i+2]));
+            weight_recovery_time = timeFromUs(atof(argv[i+3]));
             i+=3;
         }else if (!strcmp(argv[i],"-plbecn")){
             plb_ecn = atoi(argv[i+1]);
@@ -266,6 +266,7 @@ int main(int argc, char **argv) {
     if (binary_failure) {
         failure_manager = new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type);
         failure_manager->setFailedLink(FatTreeSwitch::AGG, 0, 0);
+        top->set_weighted(true);
         // top->add_failed_link(FatTreeSwitch::AGG, 0, 0, failure_type);
         // top->add_symmetric_failures(binary_failures_per_pod);
     }
@@ -392,6 +393,8 @@ int main(int argc, char **argv) {
     //    ShortFlows* sf = new ShortFlows(2560, eventlist, net_paths,conns,lg, &swiftRtxScanner);
 
     cout << "Loaded " << connID << " connections in total\n";
+
+    // top->populate_all_routes(); // Do not lazily find routes since we will need all routes for later changes
 
     // GO!
     cout << "Starting simulation" << endl;

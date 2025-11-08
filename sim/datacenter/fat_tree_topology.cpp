@@ -1106,28 +1106,36 @@ void FatTreeTopology::restore_failed_link(uint32_t type, uint32_t switch_id, uin
 void FatTreeTopology::update_routes(uint32_t switch_id) {
     // Get the appropriate switch and clear its FIB
     Switch* switch_up = switches_up[switch_id];
-    switch_up->resetFib();
+    switch_up->resetFib(true);
     // Let the swtich re-populate its FIB as traffic arrives (will check if links are down)  
 }
 
-void FatTreeTopology::update_weights(uint32_t switch_id, vector<int> link_weights, vector<int> destinations) { // todo: maybe an optional destination arg so as to only reweight routes for that destination
+void FatTreeTopology::update_weights(uint32_t switch_id, map<string,int> link_weights) {
     // Get the appropriate switch
-    Switch* switch_up = switches_up[switch_id];
-    // Redo FIB weights according to the new link weights (reset and then apply)
-    RouteTable* fib = switch_up->getFib();
-    // vector<FibEntry*>* uproutes = ((FatTreeSwitch*) switch_up)->getUproutes(); // TODO: [fix] these only exist for TORs
+    FatTreeSwitch* switch_up = (FatTreeSwitch*)switches_up[switch_id];
+    // Set the link weights on the switch
+    switch_up->setWeights(link_weights);
+    // Apply weights to existing routes (if any)
+    switch_up->applyWeights();
 
-    // vector<int> up_dests = ((FatTreeSwitch*) switch_up)->getUpDestinations();
-    for (int dst : destinations) { 
-        vector<FibEntry*>* uproutes = fib->getRoutes(dst);
-        vector<FibEntry*>* emptyRoutes = {};
-        fib->setRoutes(dst, emptyRoutes);
-        int i = 0;
-        for (FibEntry* route : *uproutes) {
-            fib->addRoute(dst, route->getEgressPort(), link_weights[i], route->getDirection());
-            i++;
-        }
-    }
+    // // Redo FIB weights according to the new link weights (reset and then apply)
+    // RouteTable* oldfib = switch_up->getOldFib(); //used because new routes may not have shown up yet
+    // // vector<FibEntry*>* uproutes = ((FatTreeSwitch*) switch_up)->getUproutes(); // TODO: [fix] these only exist for TORs
+
+    // // vector<int> up_dests = ((FatTreeSwitch*) switch_up)->getUpDestinations();
+    // for (int dst : destinations) { 
+    //     vector<FibEntry*>* routes = oldfib->getRoutes(dst);
+    //     vector<FibEntry*>* emptyRoutes = {};
+    //     RouteTable* newfib = switch_up->getFib();
+    //     newfib->setRoutes(dst, emptyRoutes);
+    //     int i = 0;
+    //     for (FibEntry* route : *routes) {
+    //         Route* port = route->getEgressPort();``
+    //         packet_direction dir = route->getDirection();
+    //         newfib->addRoute(dst, port, link_weights[i], dir);
+    //         i++;
+    //     }
+    // }
 }
 
 void FatTreeTopology::update_weights_tor_podfailed(int failed_pod) { 
@@ -1142,17 +1150,17 @@ void FatTreeTopology::update_weights_tor_podfailed(int failed_pod) {
         switch_weights[switches_up[agg]->nodename()] = switch_weight;
         total_weight += switch_weight;
     }
-    // Assign weights to links on ToR based on agg switch weights
+    // // Assign weights to links on ToR based on agg switch weights
     for (int i = 0; i < tor_switches_per_pod(); i++) {
         uint32_t tor = first_tor + i;
-        vector<int> route_weights = {};
-        vector<FibEntry*>* routes = ((FatTreeSwitch*) switches_lp[tor])->getUproutes(); // need to associate routes with their agg switch
-        for (FibEntry* route : *routes) {
-            int port_weight = switch_weights[route->getEgressPort()->at(0)->getRemoteEndpoint()->nodename()];
-            route_weights.push_back(port_weight);
-        }
-        // update to these weights for all inter-pod routes
-        update_weights(tor, route_weights, ((FatTreeSwitch*)switches_up[first_agg])->getUpDestinations());
+    //     vector<int> route_weights = {};
+    //     vector<FibEntry*>* routes = ((FatTreeSwitch*) switches_lp[tor])->getUproutes(); // need to associate routes with their agg switch
+    //     for (FibEntry* route : *routes) {
+    //         int port_weight = switch_weights[route->getEgressPort()->at(0)->getRemoteEndpoint()->nodename()];
+    //         route_weights.push_back(port_weight);
+    //     }
+    //     // update to these weights for all inter-pod routes
+        update_weights(tor, switch_weights);
     }
 
 }
@@ -1176,19 +1184,35 @@ void FatTreeTopology::update_weights_tor_otherpod(int failed_pod) { // this shou
         // Assign weights to links on ToR based on agg switch weights
         for (int i = 0; i < tor_switches_per_pod(); i++) {
             uint32_t tor = first_tor + i;
-            vector<int> route_weights = {};
-            vector<FibEntry*>* routes = ((FatTreeSwitch*) switches_lp[tor])->getUproutes(); // need to associate routes with their agg switch
-            for (FibEntry* route : *routes) {
-                int port_weight = switch_weights[route->getEgressPort()->at(0)->getRemoteEndpoint()->nodename()];
-                route_weights.push_back(port_weight);
-            }
-            // update to these weights for all routes to that pod
-            vector<int> dsts = {};
-            for (int i = MIN_POD_HOST(failed_pod); i <= MAX_POD_HOST(failed_pod); ++i) {
-                dsts.push_back(i);
-            }
-            update_weights(tor, route_weights, dsts);
+            // vector<int> route_weights = {};
+            // std::cout << "Updating weights for tor " << tor << std::endl;
+            // FatTreeSwitch* tor_switch = (FatTreeSwitch*) switches_lp[tor];
+            // vector<FibEntry*>* routes = tor_switch->getUproutes(); // need to associate routes with their agg switch
+            // for (FibEntry* route : *routes) {
+            //     int port_weight = switch_weights[route->getEgressPort()->at(0)->getRemoteEndpoint()->nodename()];
+            //     route_weights.push_back(port_weight);
+            // }
+            // // update to these weights for all routes to that pod
+            // vector<int> dsts = {};
+            // for (int i = MIN_POD_HOST(failed_pod); i <= MAX_POD_HOST(failed_pod); i++) {
+            //     dsts.push_back(i);
+            // }
+            update_weights(tor, switch_weights);
         }
+    }
+}
+
+void FatTreeTopology::populate_all_routes() {
+    for (Switch* s : switches_lp) {
+        FatTreeSwitch* ft = (FatTreeSwitch*) s;
+        ft->forcePopulateRoutes();
+    } 
+    for (Switch* s : switches_up) {
+        FatTreeSwitch* ft = (FatTreeSwitch*) s;
+        ft->forcePopulateRoutes();
+    } for (Switch* s : switches_c) {
+        FatTreeSwitch* ft = (FatTreeSwitch*) s;
+        ft->forcePopulateRoutes();
     }
 }
 
