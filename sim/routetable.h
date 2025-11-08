@@ -51,6 +51,11 @@ public:
     void setWeighted(bool weighted) {_weighted=weighted;}
     bool getWeighted() {return _weighted;}
     HostFibEntry* getHostRoute(int destination, int flowid);
+    bool isEmpty() {return _fib.empty();}
+    RouteTable* copy() {RouteTable* rt = new RouteTable(); rt->_weighted=_weighted; rt->_fib = _fib; return rt;}
+    void clearRoutes();
+    void addWeightedRoute(int destination, Route* port, int cost, packet_direction direction, int weight);  
+    vector<int> getDestinations();
     
 private:
     unordered_map<int,vector<FibEntry*>* > _fib;

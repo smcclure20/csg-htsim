@@ -127,9 +127,10 @@ public:
     void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id, FailType failure_type);
     void restore_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
     void update_routes(uint32_t switch_id);
-    void update_weights(uint32_t switch_id, vector<int> link_weights, vector<int> destinations); // assumes only TORs for now
+    void update_weights(uint32_t switch_id, map<string,int> link_weights); // assumes only TORs for now
     void update_weights_tor_podfailed(int failed_pod);
     void update_weights_tor_otherpod(int failed_pod);
+    void populate_all_routes();
 
     void add_symmetric_failures(int failures);
 

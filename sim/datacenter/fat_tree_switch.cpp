@@ -19,6 +19,7 @@ FatTreeSwitch::FatTreeSwitch(EventList& eventlist, string s, switch_type t, uint
     _last_choice = eventlist.now();
     _fib = new RouteTable(); 
     _fib->setWeighted(ft->weighted());
+    _switch_weights = map<string,int> {};
 }
 
 void FatTreeSwitch::receivePacket(Packet& pkt){
@@ -377,6 +378,37 @@ int FatTreeSwitch::countActiveRoutesToPod(int pod) {
     return count;
 }
 
+vector<FibEntry*>* FatTreeSwitch::getUproutes() {
+    if (_uproutes != NULL) {
+        return _uproutes;
+    }
+    uint32_t example_dst = (_id + 1) * _ft->radix_down(TOR_TIER);
+
+    addRoute(example_dst);
+    assert(_uproutes);
+    return _uproutes;
+}
+
+void FatTreeSwitch::forcePopulateRoutes() {
+    uint32_t hosts = _ft->no_of_servers();
+    for (uint32_t i=0; i < hosts; i++) {
+        addRoute(i);
+    }
+}
+
+void FatTreeSwitch::applyWeights() {
+    // For all existing routes, add according to weight
+    vector<int> dsts = _fib->getDestinations();
+    for (int dst: dsts) {
+        vector<FibEntry*>* routes = _fib->getRoutes(dst);
+        for (FibEntry* route : *routes) {
+            string neighborname = route->getEgressPort()->at(0)->getRemoteEndpoint()->nodename();
+            int weight = _switch_weights.find(neighborname) == _switch_weights.end() ? 1 : _switch_weights[neighborname];
+            _fib->addWeightedRoute(dst, route->getEgressPort(), route->getCost(), route->getDirection(), weight);
+        }
+    }
+}
+
 FatTreeSwitch::routing_strategy FatTreeSwitch::_strategy = FatTreeSwitch::NIX;
 uint16_t FatTreeSwitch::_ar_fraction = 0;
 uint16_t FatTreeSwitch::_ar_sticky = FatTreeSwitch::PER_PACKET;
@@ -459,60 +491,71 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 
                 break;
             }
+        // std::cout << "Destination " << pkt.dst() << " choice " << ecmp_choice << " options " << available_hops->size() << std::endl;
         FibEntry* e = (*available_hops)[ecmp_choice];
         pkt.set_direction(e->getDirection());
         return e->getEgressPort();
+    } else if (_type == TOR &&  _ft->HOST_POD_SWITCH(pkt.dst()) == _id) {
+        //this host is directly connected!
+        HostFibEntry* fe = _fib->getHostRoute(pkt.dst(),pkt.flow_id());
+        assert(fe);
+        pkt.set_direction(DOWN);
+        return fe->getEgressPort();
+    } else { // We have not seen a packet with this destination yet, figure out its route
+        addRoute(pkt.dst());
+        return getNextHop(pkt, ingress_port);
     }
+    
+}
 
+
+void FatTreeSwitch::addRoute(uint32_t dst) {
     //no route table entries for this destination. Add them to FIB or fail. 
     if (_type == TOR){
         // std::cout << "Adding route to TOR switch" << std::endl;s
-        if ( _ft->HOST_POD_SWITCH(pkt.dst()) == _id) { 
-            //this host is directly connected!
-            HostFibEntry* fe = _fib->getHostRoute(pkt.dst(),pkt.flow_id());
-            assert(fe);
-            pkt.set_direction(DOWN);
-            return fe->getEgressPort();
-        } else {
-            //route packet up!
-            _up_destinations.push_back(pkt.dst());
-            if (_uproutes) // this avoids calculating the uproutes for all destinations (can keep for now since no failures on ToR uplinks)
-                _fib->setRoutes(pkt.dst(),_uproutes);
-            else {
-                uint32_t podid,agg_min,agg_max;
-
-                if (_ft->get_tiers()==3) {
-                    podid = _id / _ft->tor_switches_per_pod();
-                    agg_min = _ft->MIN_POD_AGG_SWITCH(podid);
-                    agg_max = _ft->MAX_POD_AGG_SWITCH(podid);
-                }
-                else {
-                    agg_min = 0;
-                    agg_max = _ft->getNAGG()-1;
-                }
-
-                for (uint32_t k=agg_min; k<=agg_max;k++){
-                    for (uint32_t b = 0; b < _ft->bundlesize(AGG_TIER); b++) {
-                        Route * r = new Route();
-                        r->push_back(_ft->queues_nlp_nup[_id][k][b]);
-                        assert(((BaseQueue*)r->at(0))->getSwitch() == this);
-
-                        r->push_back(_ft->pipes_nlp_nup[_id][k][b]);
-                        r->push_back(_ft->queues_nlp_nup[_id][k][b]->getRemoteEndpoint());
-                        _fib->addRoute(pkt.dst(),r,1,UP);
-                    }
-                }
-                _uproutes = _fib->getRoutes(pkt.dst());
-                // permute_paths(_uproutes);
-            }
+        if ( _ft->HOST_POD_SWITCH(dst) == _id) {
+            //this host is directly connected! should be directly set elsewhere
+            return;
         }
+        //route packet up!
+        _up_destinations.push_back(dst);
+        if (_uproutes) // this avoids calculating the uproutes for all destinations (can keep for now since no failures on ToR uplinks)
+            _fib->setRoutes(dst,_uproutes);
+        else {
+            uint32_t podid,agg_min,agg_max;
+
+            if (_ft->get_tiers()==3) {
+                podid = _id / _ft->tor_switches_per_pod();
+                agg_min = _ft->MIN_POD_AGG_SWITCH(podid);
+                agg_max = _ft->MAX_POD_AGG_SWITCH(podid);
+            }
+            else {
+                agg_min = 0;
+                agg_max = _ft->getNAGG()-1;
+            }
+
+            for (uint32_t k=agg_min; k<=agg_max;k++){
+                for (uint32_t b = 0; b < _ft->bundlesize(AGG_TIER); b++) {
+                    Route * r = new Route();
+                    r->push_back(_ft->queues_nlp_nup[_id][k][b]);
+                    assert(((BaseQueue*)r->at(0))->getSwitch() == this);
+
+                    r->push_back(_ft->pipes_nlp_nup[_id][k][b]);
+                    r->push_back(_ft->queues_nlp_nup[_id][k][b]->getRemoteEndpoint());
+                    _fib->addRoute(dst,r,1,UP);
+                }
+            }
+            _uproutes = _fib->getRoutes(dst);
+            // permute_paths(_uproutes);
+        }
+
     } else if (_type == AGG) {
         // std::cout << "Adding route to AGG switch " << _id << std::endl;
-        if ( _ft->get_tiers()==2 || _ft->HOST_POD(pkt.dst()) == _ft->AGG_SWITCH_POD_ID(_id)) {
+        if ( _ft->get_tiers()==2 || _ft->HOST_POD(dst) == _ft->AGG_SWITCH_POD_ID(_id)) {
             //must go down!
             //target NLP id is 2 * pkt.dst()/K
             // std::cout << "Down route" << std::endl;
-            uint32_t target_tor = _ft->HOST_POD_SWITCH(pkt.dst());
+            uint32_t target_tor = _ft->HOST_POD_SWITCH(dst);
             for (uint32_t b = 0; b < _ft->bundlesize(AGG_TIER); b++) {
                 Route * r = new Route();
                 r->push_back(_ft->queues_nup_nlp[_id][target_tor][b]);
@@ -521,18 +564,18 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 r->push_back(_ft->pipes_nup_nlp[_id][target_tor][b]);          
                 r->push_back(_ft->queues_nup_nlp[_id][target_tor][b]->getRemoteEndpoint());
 
-                _fib->addRoute(pkt.dst(),r,1, DOWN);
+                _fib->addRoute(dst,r,1, DOWN);
             }
         } else {
             //go up!
             // std::cout << "Up route" << std::endl;
-            _up_destinations.push_back(pkt.dst());
+            _up_destinations.push_back(dst);
             
             uint32_t podpos = _id % _ft->agg_switches_per_pod();
             uint32_t uplink_bundles = _ft->radix_up(AGG_TIER) / _ft->bundlesize(CORE_TIER);
             for (uint32_t l = 0; l <  uplink_bundles ; l++) {
                 uint32_t core = l * _ft->agg_switches_per_pod() + podpos;
-                uint32_t dst_agg =  _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(pkt.dst()))   + podpos;  // find first switch of destination pod and move to pod position
+                uint32_t dst_agg =  _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(dst))   + podpos;  // find first switch of destination pod and move to pod position
                 for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
                     // std::cout << "Checking core router " << core  << " and dst agg " << dst_agg << std::endl;
                     // Check if the link between the core switch and the destination AGG switch is up TODO: make this general. Add a method to fattreetop to check if a down path is up
@@ -553,7 +596,7 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     r->push_back(_ft->pipes_nup_nc[_id][core][b]);
                     r->push_back(_ft->queues_nup_nc[_id][core][b]->getRemoteEndpoint());
                 
-                    _fib->addRoute(pkt.dst(),r,1,UP);
+                    _fib->addRoute(dst,r,1,UP);
 
                     // cout << "AGG switch " << _id << " adding route to " << pkt.dst() << " via CORE " << core << " bundle_id " << b << endl;
                 }
@@ -561,7 +604,7 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
         }
     } else if (_type == CORE) { 
         // std::cout << "Adding route to CORE switch" << std::endl;
-        uint32_t nup = _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(pkt.dst())) + (_id % _ft->agg_switches_per_pod());
+        uint32_t nup = _ft->MIN_POD_AGG_SWITCH(_ft->HOST_POD(dst)) + (_id % _ft->agg_switches_per_pod());
         for (uint32_t b = 0; b < _ft->bundlesize(CORE_TIER); b++) {
             // Do not add the route if the link is down
             if (_ft->queues_nc_nup[_id][nup][b] == NULL || _ft->queues_nc_nup[_id][nup][b]->getFailed()) {
@@ -579,15 +622,12 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
             r->push_back(_ft->pipes_nc_nup[_id][nup][b]);
 
             r->push_back(_ft->queues_nc_nup[_id][nup][b]->getRemoteEndpoint());
-            _fib->addRoute(pkt.dst(),r,1,DOWN);
+            _fib->addRoute(dst,r,1,DOWN);
         }
     }
     else {
         cerr << "Route lookup on switch with no proper type: " << _type << endl;
         abort();
     }
-    assert(_fib->getRoutes(pkt.dst()));
-
-    //FIB has been filled in; return choice. 
-    return getNextHop(pkt, ingress_port);
+    assert(_fib->getRoutes(dst));
 };
