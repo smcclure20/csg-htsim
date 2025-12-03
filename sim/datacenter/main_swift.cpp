@@ -227,7 +227,7 @@ int main(int argc, char **argv) {
                                                lg, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
     */
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures, 0, false, 0);
+                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures, 0, false, 0, false);
 #endif
 
 #ifdef OV_FAT_TREE
@@ -427,10 +427,11 @@ int main(int argc, char **argv) {
             //routein->push_back(swiftSrc);
         }
 
+        swiftSrc->set_paths(net_paths[src][dest]);
         if (no_of_subflows == 1) {
             swiftSrc->connect(*routeout, *routein, *swiftSnk, (uint32_t)crt->start, dest);
         }
-        swiftSrc->set_paths(net_paths[src][dest]);
+        
         if (no_of_subflows > 1) {
             // could probably use this for single-path case too, but historic reasons
             cout << "will start subflow " << c << " at " << crt->start << endl;
@@ -438,9 +439,12 @@ int main(int argc, char **argv) {
         }
 
         if (route_strategy != SOURCE_ROUTE) {
-            for (SwiftSubflowSrc* sub : swiftSrc->subflows()) {
+            for (int i = 0; i < no_of_subflows; i++) {
+                SwiftSubflowSrc* sub = swiftSrc->subflows()[i];
+                SwiftSubflowSink* sub_sink = swiftSnk->_subs[i];
                 top->add_host_port(src, sub->flow().flow_id(), sub);
-                top->add_host_port(dest, sub->flow().flow_id(), swiftSnk);
+                top->add_host_port(dest, sub->flow().flow_id(), sub_sink);
+                cout << "Added subflow " << sub->flow().flow_id() << " from " << src << " to " << dest << endl;
             }
         }
           

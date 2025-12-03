@@ -14,6 +14,11 @@ void RouteTable::addRoute(int destination, Route* port, int cost, packet_directi
     _fib[destination]->push_back(new FibEntry(port,cost,direction));
 }
 
+void RouteTable::addRoute(int destination, Route* port, int cost, packet_direction direction, int weight){  
+    addRoute(destination, port, cost, direction);
+    addWeightedRoute(destination, port, cost, direction, weight);
+}
+
 void RouteTable::addWeightedRoute(int destination, Route* port, int cost, packet_direction direction, int weight){  
     if (!_weighted) {
         return;
@@ -23,7 +28,10 @@ void RouteTable::addWeightedRoute(int destination, Route* port, int cost, packet
     
     assert(port!=NULL);
 
-    _weighted_fib[destination]->push_back(new FibEntry(port,cost,direction));
+    for (int i = 0; i < weight; i++) {
+        _weighted_fib[destination]->push_back(new FibEntry(port,cost,direction));
+    }
+
 }
 
 void RouteTable::addHostRoute(int destination, Route* port, int flowid){  

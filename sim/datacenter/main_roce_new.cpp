@@ -239,7 +239,7 @@ int main(int argc, char **argv) {
    
 #ifdef FAT_TREE
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, snd_type, link_failures, failure_pct, false, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+                                               NULL, &eventlist, NULL, queue_type, snd_type, link_failures, failure_pct, false, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0), false);
     // if (flaky_links > 0) {
     //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
     // }

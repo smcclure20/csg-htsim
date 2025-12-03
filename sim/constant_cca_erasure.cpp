@@ -117,6 +117,8 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     // _path_qualities.assign(_ev_count, 0.0);
     // _path_skipped.assign(_ev_count, false);
     _pathid = 0;
+    _ev_timers = {};
+    _uec_mp = new UecMpReps(16000, false, true);
     
 
     _mss = Packet::data_packet_size();
@@ -127,11 +129,10 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _app_limited = -1;
     _completion_time = 0;
 
-    // PLB init
     _plb = false; // enable using enable_plb()
     _spraying = false;
 
-    _oldest_sent = timeInf;
+    _timer_start = timeInf;
     _min_rto = timeFromUs((uint32_t)10);
     _rtt = 0;
     _rto = timeFromMs(1);
@@ -149,6 +150,7 @@ ConstantErasureCcaSrc::send_packets() {
         }
         return 0;
     } else { 
+        // This is a hacky placement for now that works because the pacer will 
         if (_pacer.allow_send()) {
             bool sent = send_next_packet();
             if (sent) {
@@ -170,7 +172,17 @@ ConstantErasureCcaSrc::send_next_packet() {
     _deferred_send = false;
 
     if (adaptive()) {
-        _pathid = _uec_mp.nextEntropy(_current_seqno, 0); // current_cwnd is unused
+        // _pathid++;
+        _pathid = _uec_mp->nextEntropy(_current_seqno, 0); // current_cwnd is unused
+        while (_ev_timers.find(_pathid) != _ev_timers.end() && eventlist().now() - _ev_timers[_pathid] > _rto) {
+            // simtime_picosec time_since_send = eventlist().now() - _ev_timers[_pathid];
+            // std::cout << "Timeout discovered at " << eventlist().now() << " with rto " << _rto  << "(time since send: " << time_since_send << ") on ev " << _pathid << " on flow " << _addr << " -> " << _destination <<  std::endl;
+            _uec_mp->processEv(_pathid, UecMultipath::PATH_TIMEOUT);
+            _ev_timers.erase(_pathid);
+            // uint32_t oldpathid = _pathid;
+            _pathid = _uec_mp->nextEntropy(_current_seqno, 0);
+        }
+        // std::cout << "New EV " << _pathid << std::endl;
     }
 
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _current_seqno, 0, mss(), _destination, _addr, _pathid);
@@ -186,19 +198,29 @@ ConstantErasureCcaSrc::send_next_packet() {
         move_path_flow_label();
     }
 
-    if(_oldest_sent == timeInf) {
-        _oldest_sent = eventlist().now();
-        _oldest_pathid = _pathid;
+    if (plb() && _timer_start == timeInf) {
+        _timer_start = eventlist().now();
     } 
-    else if (plb() && eventlist().now() - _oldest_sent > _rto) { // If no packets have gotten through, reroute
+    else if (plb() && eventlist().now() - _timer_start > _rto) { // If no packets have gotten through, reroute. NOTE: may have weird effects if already rerouted on _plb_interval stuff
         _last_good_path = eventlist().now();
         move_path_flow_label();
-        _oldest_sent = eventlist().now();
-    } else if (adaptive() && eventlist().now() - _oldest_sent > _rto) {
-        _uec_mp.processEv(_oldest_pathid, UecMultipath::PATH_TIMEOUT); // THis is not the right path id! 
+        _timer_start = eventlist().now();
+    } 
+    
+    if (adaptive() && _ev_timers.find(_pathid) == _ev_timers.end()) {
+        _ev_timers[_pathid] = eventlist().now();    
     }
 
     return true;
+}
+
+void 
+ConstantErasureCcaSrc::check_ev_timers(simtime_picosec now) {
+    for (std::map<uint32_t, simtime_picosec>::iterator it = _ev_timers.begin(); it != _ev_timers.end(); ++it) {
+        if (now - it->second > _rto) {
+            _uec_mp->processEv(it->first, UecMultipath::PATH_TIMEOUT);
+        }
+    }
 }
 
 void
@@ -250,7 +272,16 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     _bytes_acked = p->ackno();
     p->free();
 
-    _oldest_sent = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
+    _timer_start = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
+    // Potential change: per-EV timers
+    if (adaptive()) {
+        _ev_timers.erase(pathid);
+    }
+
+    if (is_complete() && _completion_time == 0) {
+        _completion_time = eventlist().now();
+    }
+
 
     // if ((_current_seqno >= _flow_size) && (!is_complete())) {
     //     // now only send packets on receiving an ACK
@@ -294,7 +325,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     }
     if (adaptive()) {
         UecMultipath::PathFeedback feedback = pkt.flags() & ECN_CE ? UecMultipath::PATH_ECN : UecMultipath::PATH_GOOD;
-        _uec_mp.processEv(pathid, feedback);
+        _uec_mp->processEv(pathid, feedback);
         // bool ecn_mark = pkt.flags() & ECN_CE;
         // _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
     }
@@ -483,3 +514,30 @@ ConstantErasureCcaSink::receivePacket(Packet& pkt) {
     // }
     p->free();
 }
+
+
+////////////////////////////////////////////////////////////////
+//  RETRANSMISSION TIMER
+////////////////////////////////////////////////////////////////
+// This just ensures that timers are checked at a consistent rate, regardless of the pacing rate (which would be easier to tie it to)
+ConstEraseRtxTimerScanner::ConstEraseRtxTimerScanner(simtime_picosec scanPeriod, EventList& eventlist)
+    : EventSource(eventlist,"RtxScanner"), _scanPeriod(scanPeriod){
+    eventlist.sourceIsPendingRel(*this, _scanPeriod);
+}
+
+void 
+ConstEraseRtxTimerScanner::registerFlow(ConstantErasureCcaSrc* src) {
+    _srcs.push_back(src);
+}
+
+
+void ConstEraseRtxTimerScanner::doNextEvent() {
+    simtime_picosec now = eventlist().now();
+    for (auto it = _srcs.begin(); it != _srcs.end(); it++) {
+        ConstantErasureCcaSrc* src = *it;
+        src->check_ev_timers(now);
+    }
+    eventlist().sourceIsPendingRel(*this, _scanPeriod);
+}
+
+

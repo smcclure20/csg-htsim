@@ -206,10 +206,10 @@ public:
     uint16_t mss() const {return _mss;}
 
     // PLB & REPS stuff
-    UecMpReps _uec_mp = UecMpReps(8, false, true);
+    UecMpReps* _uec_mp;
+    std::map<uint32_t, simtime_picosec> _ev_timers;
     // timeouts for plb
-    simtime_picosec _oldest_sent;
-    uint32_t _oldest_pathid;
+    simtime_picosec _timer_start;
 
 protected:
     // connection state
