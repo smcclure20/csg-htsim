@@ -124,8 +124,8 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _last_good_path = src.eventlist().now();
     _plb_threshold_ecn = src._plb_threshold_ecn;
 
-    _path_qualities.assign(src._ev_count, 0.0);
-    _path_skipped.assign(src._ev_count, false);
+    _uec_mp = new UecMpReps(16000, false, true);
+    _ev_timers = {};
     
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
@@ -389,7 +389,12 @@ ConstantCcaSubflowSrc::send_next_packet() {
     }
 
     if (_src.adaptive()) {
-        _pathid = _uec_mp.nextEntropy(seqno, 0); // current_cwnd is unused
+        _pathid = _uec_mp->nextEntropy(seqno, 0); // current_cwnd is unused
+        while (_ev_timers.find(_pathid) != _ev_timers.end() && eventlist().now() - _ev_timers[_pathid] > _rto) {
+            _uec_mp->processEv(_pathid, UecMultipath::PATH_TIMEOUT);
+            _ev_timers.erase(_pathid);
+            _pathid = _uec_mp->nextEntropy(seqno, 0);
+        }
     }
 
     ConstantCcaPacket::seq_t dsn;
@@ -420,16 +425,17 @@ ConstantCcaSubflowSrc::send_next_packet() {
         move_path_flow_label();
     }
 
-    if(_oldest_sent == timeInf) {
-        _oldest_sent = eventlist().now();
-        _oldest_pathid = _pathid;
+    if (_src.plb() && _timer_start == timeInf) {
+        _timer_start = eventlist().now();
     } 
-    else if (_src.plb() && eventlist().now() - _oldest_sent > _rto) { // If no packets have gotten through, reroute
+    else if (_src.plb() && eventlist().now() - _timer_start > _rto) { // If no packets have gotten through, reroute. NOTE: may have weird effects if already rerouted on _plb_interval stuff
         _last_good_path = eventlist().now();
         move_path_flow_label();
-        _oldest_sent = eventlist().now();
-    } else if (_src.adaptive() && eventlist().now() - _oldest_sent > _rto) {
-        _uec_mp.processEv(_oldest_pathid, UecMultipath::PATH_TIMEOUT); // THis is not the right path id! 
+        _timer_start = eventlist().now();
+    } 
+    
+    if (_src.adaptive() && _ev_timers.find(_pathid) == _ev_timers.end()) {
+        _ev_timers[_pathid] = eventlist().now();    
     }
 
     return true;
@@ -572,6 +578,11 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     uint32_t pathid = p->pathid();
     p->free();
 
+    _timer_start = timeInf; // reset timer on receiving an ACK 
+    if (_src.adaptive()) {
+        _ev_timers.erase(pathid);
+    }
+
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " recvack  " << ackno << " ts_echo " << timeAsUs(ts_echo) << endl;
     //cout << timeAsUs(eventlist().now()) << " " << nodename() << " highest_sent was  " << _sub->_highest_sent << endl;
 
@@ -625,7 +636,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     }
     if (_src.adaptive()) {
         UecMultipath::PathFeedback feedback = pkt.flags() & ECN_CE ? UecMultipath::PATH_ECN : UecMultipath::PATH_GOOD;
-        _uec_mp.processEv(pathid, feedback);
+        _uec_mp->processEv(pathid, feedback);
         // bool ecn_mark = pkt.flags() & ECN_CE;
         // _path_qualities.at(pathid) = (ecn_mark * 0.25) + (_path_qualities.at(pathid) * 0.75);// (high is bad)
     }

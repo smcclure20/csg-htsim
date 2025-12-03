@@ -24,11 +24,17 @@ void FailureManager::setFailedLink(uint32_t switch_type, uint32_t id, uint32_t l
 void FailureManager::doNextEvent() { 
     if (!_link_failed && _eventlist.now() >= _fail_time) {
         std::cout << "Failing link " << _switch_type << " " << _switch_id << ": link " << _link_number <<  " at time " << _eventlist.now() << std::endl;
-        _ft->add_failed_link(_switch_type, 0, 0, _failure_type);
+        _ft->add_failed_link(_switch_type, _switch_id, _link_number, _failure_type);
         _link_failed = true;
-        _eventlist.sourceIsPending(*this, _route_update_time);
-        _eventlist.sourceIsPending(*this, _weight_update_time);
-    } else {
+        if (_route_update_time != 0) {
+            _eventlist.sourceIsPending(*this, _route_update_time);
+        }
+        if (_weight_update_time != 0) {
+            _eventlist.sourceIsPending(*this, _weight_update_time);
+        }
+        
+    }
+    if (_route_update_time != 0 ) {
         if (!_routes_updated && _eventlist.now() >= _route_update_time) {
             std::cout << "Updating routes " << _eventlist.now() << std::endl;
             _ft->update_routes(_switch_id);
@@ -39,6 +45,8 @@ void FailureManager::doNextEvent() {
                 _ft->update_routes(agg);
             }
         }
+    } 
+    if (_weight_update_time != 0 ) {
         if (!_weights_updated && _eventlist.now() >= _weight_update_time) {
             std::cout << "Updating weights " << _eventlist.now() << std::endl;
             

@@ -62,8 +62,7 @@ class Switch : public EventSource, public Drawable, public PacketSink {
     virtual const string& nodename() {return _name;}
 
     RouteTable* getFib() {return _fib;}
-    RouteTable* getOldFib() {return _old_fib;}
-    void resetFib(bool checkpoint);
+    void resetFib();
     
 protected:
     vector<BaseQueue*> _ports;
@@ -71,7 +70,6 @@ protected:
     string _name;
 
     RouteTable* _fib;
-    RouteTable* _old_fib;
  
     static uint32_t id;
 };

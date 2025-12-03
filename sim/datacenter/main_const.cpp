@@ -21,6 +21,7 @@
 //#include "vl2_topology.h"
 
 #include "fat_tree_topology.h"
+#include "failure_manager.h"
 //#include "generic_topology.h"
 //#include "oversubscribed_fat_tree_topology.h"
 //#include "multihomed_fat_tree_topology.h"
@@ -75,6 +76,13 @@ int main(int argc, char **argv) {
     HostLBStrategy host_lb = NOLB;
     int link_failures = 0;
     double failure_pct = 0.1; // failed links have 10% bandwidth
+    FailType failure_type = BLACK_HOLE_DROP;
+    bool binary_failure = false;
+    int binary_failures = 0;
+    simtime_picosec fail_time = timeInf;
+    simtime_picosec route_recovery_time = timeInf;
+    simtime_picosec weight_recovery_time = timeInf;
+    std::vector<FailureManager*> failure_managers = {};
     int plb_ecn = 0;
     queue_type queue_type = ECN;
     double rate_coef = 1.0;
@@ -82,6 +90,8 @@ int main(int argc, char **argv) {
     int flaky_links = 0;
     simtime_picosec latency = 0;
     bool disable_fr = false;
+    bool sack = false;
+    int ooo_limit = 0;
     int dupack_thresh = 3;
 
     int i = 1;
@@ -135,7 +145,21 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-failpct")){
             failure_pct = stod(argv[i+1]);
             i++;
-        }  else if (!strcmp(argv[i],"-plbecn")){
+        }   else if (!strcmp(argv[i],"-ftype")){
+            if (!strcmp(argv[i+1], "drop")) {
+                failure_type = BLACK_HOLE_DROP;
+            }else if (!strcmp(argv[i+1], "queue")) {
+                failure_type = BLACK_HOLE_QUEUE;
+            } else {
+                exit_error(argv[0]);
+            }
+            i++;
+        }  else if (!strcmp(argv[i],"-ftime")){
+            fail_time = timeFromUs(atof(argv[i+1]));
+            route_recovery_time = timeFromUs(atof(argv[i+2]));
+            weight_recovery_time = timeFromUs(atof(argv[i+3]));
+            i+=3;
+        } else if (!strcmp(argv[i],"-plbecn")){
             plb_ecn = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-trim")){
@@ -158,6 +182,10 @@ int main(int argc, char **argv) {
             i++;
         } else if (!strcmp(argv[i],"-nofr")){
             disable_fr = true;
+        } else if (!strcmp(argv[i],"-sack")){
+            sack = true;
+            ooo_limit = atoi(argv[i+1]);
+            i++;
         } else if (!strcmp(argv[i],"-dup")){
             dupack_thresh = atoi(argv[i+1]);
             i++;
@@ -225,6 +253,12 @@ int main(int argc, char **argv) {
         cout << "PLB and composite queueing not supported (for now)" << endl;
         exit(1);
     }
+
+    if (failure_pct == -1.0) {  // signifies failure that is routed around (vs. still in route tables with 0.0)
+        binary_failure = true; 
+        binary_failures= link_failures;
+        link_failures = 0;
+    }
       
     
     // Log of per-flow stats
@@ -253,11 +287,18 @@ int main(int argc, char **argv) {
     ConstantCcaRtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
    
 #ifdef FAT_TREE
+    // TODO: need to update failure stuff to match const erase
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+                                               NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0), false);
     // if (flaky_links > 0) {
     //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
     // }
+    if (binary_failure) {
+        for (int i=0; i< binary_failures; i++){
+            failure_managers.push_back(new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type));
+            failure_managers[i]->setFailedLink(FatTreeSwitch::AGG, (int)(i / (top->no_of_pods()/2)), i%(top->no_of_pods()/2)); // TODO: move this into the failure manager rather than here
+        }
+    }
 #endif
 
 #ifdef OV_FAT_TREE
@@ -377,6 +418,10 @@ int main(int argc, char **argv) {
 
         if (disable_fr) {
             sender->disable_fast_recovery(); // no fast recovery when we have packet trimming
+        }
+        if (sack) {
+            sender->set_sack();
+            sender->set_ooo_limit(ooo_limit);
         }
                         
         if (crt->size>0){

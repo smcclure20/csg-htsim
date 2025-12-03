@@ -73,7 +73,7 @@ public:
                     EventList* ev,FirstFit* f, queue_type qt, uint32_t fail, double fail_pct = 0);
     FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
                     EventList* ev,FirstFit* f, queue_type qt, queue_type sender_qt, uint32_t fail, double fail_pct = 0, bool rts = false, simtime_picosec hoplatency = 0, 
-                    int flakylinks = 0, simtime_picosec interarrival = 0, simtime_picosec duration = 0);
+                    int flakylinks = 0, simtime_picosec interarrival = 0, simtime_picosec duration = 0, bool weighted = false);
 
     static void set_tier_parameters(int tier, int radix_up, int radix_down, mem_b queue_up, mem_b queue_down, int bundlesize, linkspeed_bps downlink_speed, int oversub);
     void set_flaky_links(uint32_t num_links, simtime_picosec interarrival, simtime_picosec duration) {

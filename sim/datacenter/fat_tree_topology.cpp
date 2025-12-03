@@ -344,7 +344,7 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
                                  QueueLoggerFactory* logger_factory,
                                  EventList* ev,FirstFit * fit, queue_type qtype,
                                  queue_type sender_qtype, uint32_t num_failed, double fail_pct, bool rts, simtime_picosec hoplatency,
-                                 int flakylinks, simtime_picosec interarrival, simtime_picosec duration){
+                                 int flakylinks, simtime_picosec interarrival, simtime_picosec duration, bool weighted){
     set_linkspeeds(linkspeed);
     set_queue_sizes(queuesize);
     if (hoplatency != 0) {
@@ -370,6 +370,8 @@ FatTreeTopology::FatTreeTopology(uint32_t no_of_nodes, linkspeed_bps linkspeed, 
         _link_loss_burst_interarrival_time = interarrival;
         _link_loss_burst_duration = duration;
     }
+    
+    set_weighted(weighted);
 
     cout << "Fat tree topology (3) with " << no_of_nodes << " nodes" << endl;
     set_params(no_of_nodes);
@@ -1057,7 +1059,7 @@ void FatTreeTopology::add_failed_link(uint32_t type, uint32_t switch_id, uint32_
     assert(switch_id < NAGG);
     
     uint32_t podpos = switch_id%(_agg_switches_per_pod);
-    uint32_t k = podpos * _agg_switches_per_pod + link_id;
+    uint32_t k = podpos + (_agg_switches_per_pod * link_id); // l * _ft->agg_switches_per_pod() + podpos;
 
     // note: if bundlesize > 1, we only fail the first link in a bundle.
     std::cout << "Failing the link between agg switch " << switch_id << " and core switch " <<  k << std::endl;
@@ -1081,7 +1083,7 @@ void FatTreeTopology::restore_failed_link(uint32_t type, uint32_t switch_id, uin
     assert(switch_id < NAGG);
     
     uint32_t podpos = switch_id%(_agg_switches_per_pod);
-    uint32_t k = podpos * _agg_switches_per_pod + link_id;
+    uint32_t k = podpos + (_agg_switches_per_pod * link_id);
 
     // TODO: Alternate approach to overwriting is to setFailed(false) and set dropAll(false) and change rate back to noraml
     QueueLogger* queueLogger;
@@ -1106,17 +1108,17 @@ void FatTreeTopology::restore_failed_link(uint32_t type, uint32_t switch_id, uin
 void FatTreeTopology::update_routes(uint32_t switch_id) {
     // Get the appropriate switch and clear its FIB
     Switch* switch_up = switches_up[switch_id];
-    switch_up->resetFib(true);
+    switch_up->resetFib(); //clears all current routes to be repopulated
     // Let the swtich re-populate its FIB as traffic arrives (will check if links are down)  
 }
 
 void FatTreeTopology::update_weights(uint32_t switch_id, map<string,int> link_weights) {
     // Get the appropriate switch
-    FatTreeSwitch* switch_up = (FatTreeSwitch*)switches_up[switch_id];
+    FatTreeSwitch* switch_lp = (FatTreeSwitch*)switches_lp[switch_id];
     // Set the link weights on the switch
-    switch_up->setWeights(link_weights);
+    switch_lp->setWeights(link_weights);
     // Apply weights to existing routes (if any)
-    switch_up->applyWeights();
+    switch_lp->applyWeights();
 
     // // Redo FIB weights according to the new link weights (reset and then apply)
     // RouteTable* oldfib = switch_up->getOldFib(); //used because new routes may not have shown up yet

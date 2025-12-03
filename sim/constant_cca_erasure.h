@@ -88,8 +88,7 @@ public:
     inline bool plb() const {return _plb;}
     void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
     // timeouts for plb
-    simtime_picosec _oldest_sent;
-    uint32_t _oldest_pathid;
+    simtime_picosec _timer_start;
 
     // packet switching
     bool _spraying;
@@ -98,10 +97,12 @@ public:
     bool _adaptive;
     void set_adaptive() {_adaptive = true;}
     inline bool adaptive() const {return _adaptive;}
-    UecMpReps _uec_mp = UecMpReps(8, false, true);
+    UecMpReps* _uec_mp;
     int _ev_count;
-    std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
-    std::vector<bool> _path_skipped;
+    // std::vector<double> _path_qualities; //indexed by path id, ewma of ecn marks or rtt or something
+    // std::vector<bool> _path_skipped;
+    std::map<uint32_t, simtime_picosec> _ev_timers;
+    void check_ev_timers(simtime_picosec now);
 
 
     uint64_t _flow_size;
@@ -192,6 +193,16 @@ private:
     void connect(ConstantErasureCcaSrc& src, const Route& route);
     const Route* _route;
     string _nodename;
+};
+
+class ConstEraseRtxTimerScanner : public EventSource {
+public:
+    ConstEraseRtxTimerScanner(simtime_picosec scanPeriod, EventList& eventlist);
+    void doNextEvent();
+    void registerFlow(ConstantErasureCcaSrc* src);
+private:
+    simtime_picosec _scanPeriod;
+    std::vector<ConstantErasureCcaSrc*> _srcs;
 };
 
 #endif

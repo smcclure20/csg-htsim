@@ -132,13 +132,13 @@ public:
     static double _ecn_threshold_fraction;
     static double _speculative_threshold_fraction;
 
-    vector<FibEntry*>* getUproutes();
-    vector<int> getUpDestinations() {return _up_destinations;}
+    // vector<FibEntry*>* getUproutes();
+    // vector<int> getUpDestinations() {return _up_destinations;}
     map<uint32_t, BaseQueue*> getUpPorts();
     int countActiveUpPorts();
     int countActiveRoutesToPod(int pod);
     void forcePopulateRoutes();
-    void addRoute(uint32_t dst);
+    bool addRoute(uint32_t dst);
     void setWeights(map<string,int> weights) {_switch_weights=weights;}
     map<string,int> getWeights() { return _switch_weights;}
     void applyWeights();

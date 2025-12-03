@@ -44,12 +44,15 @@ class RouteTable {
 public:
     RouteTable() {};
     void addRoute(int destination, Route* port, int cost, packet_direction direction);  
+    void addRoute(int destination, Route* port, int cost, packet_direction direction, int weight);  
     void addHostRoute(int destination, Route* port, int flowid);  
     void setRoutes(int destination, vector<FibEntry*>* routes);  
     vector <FibEntry*>* getRoutes(int destination);
     vector <FibEntry*>* getWeightedRoutes(int destination);
     void setWeighted(bool weighted) {_weighted=weighted;}
     bool getWeighted() {return _weighted;}
+    void initialize_weighted_table() {_weighted_fib = _fib;}
+    void clear_weighted_table() { _weighted_fib = unordered_map<int,vector<FibEntry*>* >{};}
     HostFibEntry* getHostRoute(int destination, int flowid);
     bool isEmpty() {return _fib.empty();}
     RouteTable* copy() {RouteTable* rt = new RouteTable(); rt->_weighted=_weighted; rt->_fib = _fib; return rt;}
@@ -59,7 +62,7 @@ public:
     
 private:
     unordered_map<int,vector<FibEntry*>* > _fib;
-    bool _weighted;
+    bool _weighted = false;
     unordered_map<int,vector<FibEntry*>* > _weighted_fib;
     unordered_map<int,unordered_map<int,HostFibEntry*>*> _hostfib;
 };

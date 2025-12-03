@@ -78,11 +78,11 @@ int main(int argc, char **argv) {
     double failure_pct = 0.1; // failed links have 10% bandwidth
     FailType failure_type = BLACK_HOLE_DROP;
     bool binary_failure = false;
-    int binary_failures_per_pod = 0;
+    int binary_failures = 0;
     simtime_picosec fail_time = timeInf;
     simtime_picosec route_recovery_time = timeInf;
     simtime_picosec weight_recovery_time = timeInf;
-    FailureManager* failure_manager = NULL;
+    std::vector<FailureManager*> failure_managers = {};
     int plb_ecn = 0;
     double ecn_thres = 0.6;
     queue_type queue_type = ECN;
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
     }
     if (failure_pct == -1.0) {  // signifies failure that is routed around (vs. still in route tables with 0.0)
         binary_failure = true; 
-        binary_failures_per_pod = link_failures;
+        binary_failures= link_failures;
         link_failures = 0;
     }
     
@@ -259,14 +259,22 @@ int main(int argc, char **argv) {
    
 
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                                NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, link_failures, failure_pct, rts, latency, flaky_links, timeFromUs(100.0), timeFromUs(10.0));
+                                                NULL, &eventlist, NULL, queue_type, CONST_SCHEDULER, 
+                                                link_failures, failure_pct, rts, latency, 
+                                                flaky_links, timeFromUs(100.0), timeFromUs(10.0), 
+                                                false);
     // if (flaky_links > 0) {
     //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
     // }
     if (binary_failure) {
-        failure_manager = new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type);
-        failure_manager->setFailedLink(FatTreeSwitch::AGG, 0, 0);
-        top->set_weighted(true);
+        for (int i=0; i< binary_failures; i++){
+            failure_managers.push_back(new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type));
+            failure_managers[i]->setFailedLink(FatTreeSwitch::AGG, (int)(i / (top->no_of_pods()/2)), i%(top->no_of_pods()/2)); // TODO: move this into the failure manager rather than here
+        }
+        
+        
+        
+        // top->set_weighted(true);
         // top->add_failed_link(FatTreeSwitch::AGG, 0, 0, failure_type);
         // top->add_symmetric_failures(binary_failures_per_pod);
     }
@@ -320,6 +328,8 @@ int main(int argc, char **argv) {
     all_conns = conns->getAllConnections();
     uint32_t connCount = all_conns->size();
 
+    // ConstEraseRtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
+
     for (uint32_t c = 0; c < all_conns->size(); c++){
         connection* crt = all_conns->at(c);
         uint32_t src = crt->src;
@@ -341,6 +351,7 @@ int main(int argc, char **argv) {
         double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
         simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
         sender = new ConstantErasureCcaSrc(eventlist, src, interpacket_delay, NULL);  
+        // rtxScanner.registerFlow(sender);
         // sender->set_cwnd(cwnd*Packet::data_packet_size());
 
         // if (queue_type == COMPOSITE_ECN) {
@@ -357,7 +368,7 @@ int main(int argc, char **argv) {
         } else if (host_lb == SPRAY) {
             sender->set_spraying();
         }  else if (host_lb == SPRAY_ADAPTIVE) {
-            sender->set_spraying();
+            // sender->set_spraying();
             sender->set_adaptive();
         }
         srcs.push_back(sender);
@@ -433,7 +444,7 @@ int main(int argc, char **argv) {
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantErasureCcaSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->get_id() << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent <<  endl;
+        flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent <<  endl;
     }
     flowlog.close();
     list <ConstantErasureCcaSink*>::iterator sink_i;
