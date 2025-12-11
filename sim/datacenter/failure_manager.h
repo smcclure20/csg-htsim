@@ -15,6 +15,7 @@ class FailureManager: public EventSource {
     public:
         FailureManager(FatTreeTopology* ft, EventList& eventlist, simtime_picosec fail_time, simtime_picosec route_time, simtime_picosec weight_time, FailType failure_type);
         void setFailedLink(uint32_t switch_type, uint32_t id, uint32_t link_id);
+        void setReturnTime(simtime_picosec link_time, simtime_picosec route_time, simtime_picosec weight_time);
         void doNextEvent();
     
     private:
@@ -29,6 +30,12 @@ class FailureManager: public EventSource {
         bool _routes_updated= false;
         simtime_picosec _weight_update_time;
         bool _weights_updated = false;
+        simtime_picosec _return_time = 0;
+        bool _link_returned = false;
+        simtime_picosec _route_return_time = 0;
+        bool _routes_returned = false;
+        simtime_picosec _weight_return_time = 0;
+        bool _weights_returned = false;
 
 };
 
