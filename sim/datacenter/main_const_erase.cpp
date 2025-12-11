@@ -82,6 +82,9 @@ int main(int argc, char **argv) {
     simtime_picosec fail_time = timeInf;
     simtime_picosec route_recovery_time = timeInf;
     simtime_picosec weight_recovery_time = timeInf;
+    simtime_picosec fail_recover_time = timeInf;
+    simtime_picosec route_return_time = timeInf;
+    simtime_picosec weight_return_time = timeInf;
     std::vector<FailureManager*> failure_managers = {};
     int plb_ecn = 0;
     double ecn_thres = 0.6;
@@ -152,12 +155,17 @@ int main(int argc, char **argv) {
                 exit_error(argv[0]);
             }
             i++;
-        }  else if (!strcmp(argv[i],"-ftime")){
+        } else if (!strcmp(argv[i],"-ftime")){
             fail_time = timeFromUs(atof(argv[i+1]));
             route_recovery_time = timeFromUs(atof(argv[i+2]));
             weight_recovery_time = timeFromUs(atof(argv[i+3]));
             i+=3;
-        }else if (!strcmp(argv[i],"-plbecn")){
+        } else if (!strcmp(argv[i],"-fdonetime")){
+            fail_recover_time = timeFromUs(atof(argv[i+1]));
+            route_return_time = timeFromUs(atof(argv[i+2]));
+            weight_return_time = timeFromUs(atof(argv[i+3]));
+            i+=3;
+        } else if (!strcmp(argv[i],"-plbecn")){
             plb_ecn = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-ecnthres")){
@@ -270,13 +278,10 @@ int main(int argc, char **argv) {
         for (int i=0; i< binary_failures; i++){
             failure_managers.push_back(new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type));
             failure_managers[i]->setFailedLink(FatTreeSwitch::AGG, (int)(i / (top->no_of_pods()/2)), i%(top->no_of_pods()/2)); // TODO: move this into the failure manager rather than here
+            if (fail_recover_time != timeInf) {
+                failure_managers[i]->setReturnTime(fail_recover_time, route_return_time, weight_return_time);
+            }
         }
-        
-        
-        
-        // top->set_weighted(true);
-        // top->add_failed_link(FatTreeSwitch::AGG, 0, 0, failure_type);
-        // top->add_symmetric_failures(binary_failures_per_pod);
     }
     
 

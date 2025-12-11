@@ -140,6 +140,7 @@ public:
     void forcePopulateRoutes();
     bool addRoute(uint32_t dst);
     void setWeights(map<string,int> weights) {_switch_weights=weights;}
+    void setFibWeighted(bool weighted) {_fib->setWeighted(weighted);}
     map<string,int> getWeights() { return _switch_weights;}
     void applyWeights();
 
