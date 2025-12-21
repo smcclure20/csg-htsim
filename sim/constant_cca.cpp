@@ -20,7 +20,7 @@ ConstantCcaPacer::schedule_send(simtime_picosec delay) {
     // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
     simtime_picosec previous_next_send = _next_send;
-    simtime_picosec new_next_send = _last_send + _interpacket_delay; //+ rand() % (_interpacket_delay/10);
+    simtime_picosec new_next_send = _last_send + _interpacket_delay + rand() % (_interpacket_delay/100);
     if (new_next_send <= eventlist().now()) {
         // Tricky!  We're going in to pacing mode, but it's more than
         // the pacing delay since we last sent.  Presumably the best
@@ -465,6 +465,10 @@ ConstantCcaSubflowSrc::retransmit_packet() {
         return;        
     }
     if (_last_acked >= _src._flow_size) {
+        return;
+    }
+    if (!_pacer.allow_send()) {
+        _pending_retransmit.insert(_last_acked+1);
         return;
     }
     // if (!_pacer.allow_send()) {
