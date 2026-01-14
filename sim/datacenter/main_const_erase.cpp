@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
             flaky_links = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-lat")){
-            latency = atoi(argv[i+1]);
+            latency = timeFromUs(stod(argv[i+1]));
             i++;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
@@ -241,6 +241,7 @@ int main(int argc, char **argv) {
     eventlist.setEndtime(endtime);
 
     queuesize = queuesize*Packet::data_packet_size();
+    // srand(13);
     srand(time(NULL));
     srandom(time(NULL));
       
