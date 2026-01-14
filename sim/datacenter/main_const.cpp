@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
             flaky_links = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-lat")){
-            latency = atoi(argv[i+1]);
+            latency = timeFromUs(stod(argv[i+1]));
             i++;
         } else if (!strcmp(argv[i],"-nofr")){
             disable_fr = true;

@@ -22,6 +22,7 @@ ConstantErasureCcaPacer::schedule_send(simtime_picosec delay) {
     // cout << "Current next send: " << timeAsUs(_next_send) << " delay " << timeAsUs(delay) << endl;
     _interpacket_delay = delay;
     simtime_picosec previous_next_send = _next_send;
+    // simtime_picosec new_next_send = _last_send + _interpacket_delay + rand() % (_interpacket_delay/10);
     simtime_picosec jitter = rand() % 1 == 0 ? -1 * rand() % (_interpacket_delay/100) : rand() % (_interpacket_delay/100);
     simtime_picosec new_next_send = _last_send + _interpacket_delay + jitter;
     if (new_next_send <= eventlist().now()) {
