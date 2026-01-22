@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
     int plb_ecn = 0;
     queue_type queue_type = ECN;
     double rate_coef = 1.0;
+    double ecn_thres = 0.6;
     bool rts = false;
     int flaky_links = 0;
     simtime_picosec latency = 0;
@@ -161,6 +162,10 @@ int main(int argc, char **argv) {
             i+=3;
         } else if (!strcmp(argv[i],"-plbecn")){
             plb_ecn = atoi(argv[i+1]);
+            i++;
+        }  else if (!strcmp(argv[i],"-ecnthres")){
+            ecn_thres = atoi(argv[i+1]);
+            FatTreeSwitch::set_ecn_threshold(ecn_thres);
             i++;
         } else if (!strcmp(argv[i],"-trim")){
             queue_type = COMPOSITE;
@@ -529,7 +534,7 @@ int main(int argc, char **argv) {
         // simtime_picosec offset = (interpacket_delay/connCount) * (connID-1);
         // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
         // simtime_picosec starttime = crt->start + offset;
-        sender->set_paths(net_paths[src][dest]);
+        // sender->set_paths(net_paths[src][dest]);
         sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), no_of_subflows, dest, *routeout, *routein);
         sender->set_cwnd(cwnd*Packet::data_packet_size());
         // sender->set_paths(net_paths[src][dest]);
@@ -540,7 +545,7 @@ int main(int argc, char **argv) {
                 ConstantCcaSubflowSink* sub_sink = sink->_subs[i];
                 top->add_host_port(src, sub->flow().flow_id(), sub);
                 top->add_host_port(dest, sub->flow().flow_id(), sub_sink);
-                cout << "Added subflow " << sub->flow().flow_id() << " from " << src << " to " << dest << endl;
+                // cout << "Added subflow " << sub->flow().flow_id() << " from " << src << " to " << dest << endl;
             }
         }
     }
@@ -621,11 +626,13 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent" << endl;
+    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent,SACKRTXs" << endl;
     for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
         ConstantCcaSink* sink = (*src_i)->_sink;
         simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << (*src_i)->packets_sent() <<  endl;
+        flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," <<
+             time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << 
+             (*src_i)->packets_sent()  << "," << (*src_i)->sack_rtxs() <<  endl;
     }
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
