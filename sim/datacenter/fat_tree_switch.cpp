@@ -534,9 +534,10 @@ bool FatTreeSwitch::addRoute(uint32_t dst) {
         }
         //route packet up!
         _up_destinations.push_back(dst);
-        // if (_uproutes) // this avoids calculating the uproutes for all destinations (can keep for now since no failures on ToR uplinks) <- wrong, might be weighted based on destiantion
-        //     _fib->setRoutes(dst,_uproutes);
-        // else {
+        if (_uproutes && _strategy == RR) // this avoids calculating the uproutes for all destinations (can keep for now since no failures on ToR uplinks) <- wrong, might be weighted based on destination
+            // WARNING: including this for now because it is important to RR performance. We do need it to be per-dst if there are failures (turn this off then or write around this)
+            _fib->setRoutes(dst,_uproutes);
+        else {
             uint32_t podid,agg_min,agg_max;
 
             if (_ft->get_tiers()==3) {
@@ -566,9 +567,9 @@ bool FatTreeSwitch::addRoute(uint32_t dst) {
                     _fib->addRoute(dst,r,1,UP,weight);
                 }
             }
-            // _uproutes = _fib->getRoutes(dst);
-            // permute_paths(_uproutes);
-        // }
+            _uproutes = _fib->getRoutes(dst);
+            permute_paths(_uproutes);
+        }
 
     } else if (_type == AGG) {
         // std::cout << "Adding route to AGG switch " << _id << std::endl;
