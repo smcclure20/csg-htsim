@@ -94,6 +94,7 @@ int main(int argc, char **argv) {
     int k = 3;
     int flaky_links = 0;
     simtime_picosec latency = 0;
+    bool get_pkt_delay = false;
 
     int i = 1;
     filename << "None";
@@ -191,6 +192,8 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-k")){
             k = stoi(argv[i+1]);
             i++;
+        }  else if (!strcmp(argv[i],"-pktdelay")){
+            get_pkt_delay = true;
         } else if (!strcmp(argv[i],"-hostlb")){
             if (!strcmp(argv[i+1], "spray")) {
                 host_lb = SPRAY;
@@ -446,12 +449,22 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Completion Time,ReceivedBytes,PacketsSent" << endl;
-    for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
-        ConstantErasureCcaSink* sink = (*src_i)->_sink;
-        simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent <<  endl;
+    if (get_pkt_delay) { // TODO: condense this
+        flowlog << "Flow ID,Completion Time,ReceivedBytes,PacketsSent,PktDelay" << endl;
+        for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
+            ConstantErasureCcaSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent << "," <<  (*src_i)->average_pkt_delay() <<  endl;
+        }
+    } else{
+            flowlog << "Flow ID,Completion Time,ReceivedBytes,PacketsSent" << endl;
+        for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
+            ConstantErasureCcaSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent <<  endl;
+        }
     }
+
     flowlog.close();
     list <ConstantErasureCcaSink*>::iterator sink_i;
     for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
