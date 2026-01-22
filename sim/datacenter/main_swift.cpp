@@ -76,6 +76,9 @@ int main(int argc, char **argv) {
     NetRouteStrategy route_strategy = SOURCE_ROUTE;
     HostLBStrategy host_lb = NOLB;
     int link_failures = 0;
+    simtime_picosec latency = 0;
+    int dupthres = 3;
+    bool get_pkt_delay = false;
 
     int i = 1;
     filename << "None";
@@ -116,6 +119,12 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-q")){
             queuesize = atoi(argv[i+1]);
             i++;
+        } else if (!strcmp(argv[i],"-dup")){
+            dupthres = atoi(argv[i+1]);
+            i++;
+        } else if (!strcmp(argv[i],"-lat")){
+            latency = timeFromUs(stod(argv[i+1]));
+            i++;
         } else if (!strcmp(argv[i],"-mtu")){
             packet_size = atoi(argv[i+1]);
             i++;
@@ -128,6 +137,8 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
+        }  else if (!strcmp(argv[i],"-pktdelay")){
+            get_pkt_delay = true;
         } else if (!strcmp(argv[i],"-hostlb")){
             if (!strcmp(argv[i+1], "spray")) {
                 host_lb = SPRAY;
@@ -227,7 +238,7 @@ int main(int argc, char **argv) {
                                                lg, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, 0);
     */
     FatTreeTopology* top = new FatTreeTopology(no_of_nodes, linkspeed, queuesize, 
-                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures, 0, false, 0, false);
+                                               NULL, &eventlist, NULL, RANDOM, SWIFT_SCHEDULER, link_failures, 0, false, latency, false);
 #endif
 
 #ifdef OV_FAT_TREE
@@ -328,6 +339,10 @@ int main(int argc, char **argv) {
         if (crt->size>0){
             swiftSrc->set_flowsize(crt->size);
         } 
+
+        if (dupthres != 3) {
+            swiftSrc->set_dupackthres((uint16_t)dupthres);
+        }
                 
         if (host_lb == PLB) {
             swiftSrc->enable_plb();
@@ -545,12 +560,22 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes" << endl;
-    for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
-        SwiftSink* sink = (*src_i)->_sink;
-        simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack <<  endl;
-        cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
+    if (get_pkt_delay) { // TODO: condense this
+        flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,PktDelay" << endl;
+        for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
+            SwiftSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack << "," << (*src_i)->get_pkt_delay() <<  endl;
+            cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
+        }
+    } else {
+        flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes" << endl;
+        for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
+            SwiftSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->get_id() << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," << time << "," << (*src_i)->rtos() << "," << sink->_cumulative_data_ack <<  endl;
+            cout << (*src_i)->get_id() << ":" << (*src_i)->get_stats(0) << endl;
+        }
     }
     flowlog.close();
     list <SwiftSink*>::iterator sink_i;
