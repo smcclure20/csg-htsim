@@ -46,6 +46,9 @@ SwiftSubflowSrc::SwiftSubflowSrc(SwiftSrc& src, TrafficLogger* pktlogger, int su
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
 
+    _total_packets = 0;
+    _total_pkt_delay = 0;
+
     _nodename = "swift_subsrc" + std::to_string(_src.get_id()) + "_" + std::to_string(sub_id);
 }
 
@@ -250,7 +253,7 @@ SwiftSubflowSrc::handle_ack(SwiftAck::seq_t ackno) {
     // Not yet in fast recovery. What should we do instead?
     _dupacks++;
 
-    if (_dupacks!=3)  { // not yet serious worry
+    if (_dupacks!=_src.dupack_thres())  { // not yet serious worry
         _src.log(this, SwiftLogger::SWIFT_RCV_DUP);
         applySwiftLimits();
         send_packets();
@@ -520,6 +523,9 @@ SwiftSubflowSrc::receivePacket(Packet& pkt)
     simtime_picosec delay = eventlist().now() - ts_echo;
     adjust_cwnd(delay, ackno);
 
+    _total_packets++;
+    _total_pkt_delay += delay;
+
     _src.update_dsn_ack(ds_ackno);
 
     handle_ack(ackno);
@@ -732,6 +738,17 @@ SwiftSrc::log(SwiftSubflowSrc* sub, SwiftLogger::SwiftEvent event) {
 int
 SwiftSrc::queuesize(int flow_id) {
     return _scheduler->src_queuesize(flow_id);
+}
+
+double
+SwiftSrc::get_pkt_delay() {
+    double total_delay = 0;
+    double total_pkts = 0;
+    for (size_t i = 0; i < _subs.size(); i++) {
+        total_delay += _subs[i]->_total_pkt_delay;
+        total_pkts += _subs[i]->_total_packets;
+    }
+    return total_delay/total_pkts;
 }
 
 bool

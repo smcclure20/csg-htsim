@@ -113,6 +113,9 @@ protected:
     SwiftSrc& _src;
     SwiftPacer _pacer;
 
+    uint64_t _total_packets;
+    simtime_picosec _total_pkt_delay;
+
 private:
     int send_packets();
     void retransmit_packet();
@@ -166,7 +169,13 @@ SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, TrafficLogger* 
         return dsn;
     }
 
+    double get_pkt_delay();
+
     bool check_stoptime();
+
+    uint16_t _dupack_thres = 3;
+    void set_dupackthres(uint16_t thres){_dupack_thres=thres;}
+    uint16_t dupack_thres() {return _dupack_thres;}
     
     void set_cwnd(uint32_t cwnd);
 
