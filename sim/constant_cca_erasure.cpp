@@ -130,6 +130,12 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _stopped = false;
     _app_limited = -1;
     _completion_time = 0;
+    _inflight = 0;
+    _highest_ack = 0;
+    _final_bdp_time = 0;
+
+    _total_pkt_delay = 0;
+    _total_packets = 0;
 
     _plb = false; // enable using enable_plb()
     _spraying = false;
@@ -151,7 +157,21 @@ ConstantErasureCcaSrc::send_packets() {
             _completion_time = eventlist().now();
         }
         return 0;
-    } else { 
+    } else if (_inflight + _bytes_acked >= _flow_size) { // final bdp
+        if (_final_bdp_time == 0) {
+            _final_bdp_time = eventlist().now();
+            return 0;
+        }
+        if (_final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rto) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
+            if (_pacer.allow_send()) {
+                bool sent = send_next_packet();
+                if (sent) {
+                    sent_count++;
+                }
+            }
+        }
+        return 0;
+    } else {
         // This is a hacky placement for now that works because the pacer will 
         if (_pacer.allow_send()) {
             bool sent = send_next_packet();
@@ -271,8 +291,14 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     simtime_picosec rtt = eventlist().now() - ts_echo;
     update_rtt(rtt);
     uint32_t pathid = p->pathid();
-    _bytes_acked = p->ackno();
+    _bytes_acked = p->ds_ackno();
+    ConstantCcaPacket::seq_t seqno = p->ackno(); // echoes the sequence number this is an ack for 
+    _highest_ack = max((uint64_t)seqno, _highest_ack);
+    _total_packets++;
+    _total_pkt_delay += rtt;
     p->free();
+
+    _inflight = _current_seqno - _highest_ack; // This is an approximation (may be more due to reordering)
 
     _timer_start = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
     // Potential change: per-EV timers
@@ -284,15 +310,22 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
         _completion_time = eventlist().now();
     }
 
+    // if (((_flow_size - _bytes_acked)/mss() >= (uint64_t)(rtt / _pacing_delay)) && (!is_complete())) {
+    //     // Sent full flow size, but not sure if the receiver will need more
+    //     _final_bdp = true;
+    //     _final_bdp_time = eventlist().now();
+    //     // Only send more if we are not done in an rtt 
+
+    // }
+
+
 
     // if ((_current_seqno >= _flow_size) && (!is_complete())) {
     //     // now only send packets on receiving an ACK
     //     if (_pacer.allow_send()) {
     //         send_next_packet();
     //     } else {
-    //         _pacer.schedule_send(_pacing_delay);
-    //         _deferred_send = true;
-    //         return;
+    //         _send_allowed = true;
     //     }
     // }
 
@@ -320,7 +353,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
 
         // PLB (simple version)
         if (now - _last_good_path > _plb_interval) {
-            cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(rtt) << endl;
+            // cout << "moving " << timeAsUs(now) << " last_good " << timeAsUs(_last_good_path) << " RTT " << timeAsUs(rtt) << endl;
             _last_good_path = now;
             move_path_flow_label();
         }
@@ -506,10 +539,11 @@ void
 ConstantErasureCcaSink::receivePacket(Packet& pkt) {
     ConstantCcaPacket *p = (ConstantCcaPacket*)(&pkt);
     _bytes_received += p->size();
+    ConstantCcaPacket::seq_t seqno = p->seqno();
 
     // if (_bytes_received >= _src->flow_size()) {
         ConstantCcaAck* newAck = ConstantCcaAck::newpkt(p->flow(), *_route, 
-                                    0, _bytes_received, 0,
+                                    0, seqno + 1, _bytes_received,
                                     p->ts(), p->src(), p->dst(), p->pathid());
 
         newAck->sendOn();

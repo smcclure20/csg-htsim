@@ -116,6 +116,10 @@ public:
     // stats
     simtime_picosec _completion_time;
     simtime_picosec _start_time;
+    simtime_picosec _total_pkt_delay;
+    uint64_t _total_packets;
+
+    simtime_picosec average_pkt_delay() {return _total_pkt_delay / _total_packets;}
 
     uint16_t _mss;
     inline uint16_t mss() const {return _mss;}
@@ -163,6 +167,10 @@ private:
     bool _deferred_send;  // set if we tried to send and the scheduler said no.
     simtime_picosec _plb_interval;
     string _nodename;
+
+    uint32_t _inflight;
+    uint64_t _highest_ack;
+    simtime_picosec _final_bdp_time;
 
     // Housekeeping
     ConstBaseScheduler* _scheduler;
