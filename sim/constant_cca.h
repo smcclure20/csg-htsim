@@ -59,7 +59,7 @@ public:
 
     void set_flowsize(uint64_t flow_size_in_bytes) {
         _flow_size = flow_size_in_bytes + mss();
-        cout << "Setting flow size to " << _flow_size << endl;
+        // cout << "Setting flow size to " << _flow_size << endl;
     }
 
     void set_stoptime(simtime_picosec stop_time) {
@@ -85,8 +85,6 @@ public:
 
     // add paths for PLB
     void enable_plb() {_plb = true;}
-    void set_paths(vector<const Route*>* rt);
-    void permute_paths();
     bool _plb;
     inline bool plb() const {return _plb;}
     uint16_t _plb_threshold_ecn;
@@ -146,6 +144,7 @@ public:
     uint32_t rtos();
     uint32_t total_dupacks();
     uint32_t packets_sent();
+    uint32_t sack_rtxs();
 
 private:
     // Housekeeping
@@ -172,8 +171,6 @@ public:
     void adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t ackno);
     void handle_ack(ConstantCcaAck::seq_t ackno);
     void move_path_flow_label();
-    void move_path(bool permit_cycles = false);
-    void reroute(const Route &route);
     void doNextEvent();
     void rtx_timer_hook(simtime_picosec now, simtime_picosec period);
     inline simtime_picosec pacing_delay() const {return _pacing_delay;}
@@ -193,6 +190,7 @@ public:
     uint32_t rtos() {return _rto_count;};
     uint32_t total_dupacks() {return _total_dupacks;};
     uint32_t packets_sent() const { return _packets_sent; }
+    uint32_t sack_rtxs() const { return _sack_rtx; }
 
     ConstantCcaSubflowSink* _subflow_sink;
 
@@ -254,6 +252,7 @@ protected:
     bool _rtx_timeout_pending;
     uint32_t _rto_count;
     uint32_t _total_dupacks;
+    uint32_t _sack_rtx;
 
     // Flow stuff
     uint32_t _pathid;
