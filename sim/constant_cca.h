@@ -145,6 +145,9 @@ public:
     uint32_t total_dupacks();
     uint32_t packets_sent();
     uint32_t sack_rtxs();
+    simtime_picosec pkt_delay();
+    uint32_t retx_count();
+    uint32_t retx_seqno_count();
 
 private:
     // Housekeeping
@@ -191,12 +194,19 @@ public:
     uint32_t total_dupacks() {return _total_dupacks;};
     uint32_t packets_sent() const { return _packets_sent; }
     uint32_t sack_rtxs() const { return _sack_rtx; }
+    uint64_t total_pkts() const { return _total_packets; }
+    simtime_picosec total_delay() const { return _total_pkt_delay; }
+    uint32_t retx_count() const { return _rtx_count; }
+    uint32_t retx_seqno_count() const { return _rtx_seqno_count; }
 
     ConstantCcaSubflowSink* _subflow_sink;
 
     uint64_t _highest_sent;  //seqno is in bytes
     uint64_t _packets_sent;
     uint64_t _highest_sent_abs;
+
+    simtime_picosec _total_pkt_delay;
+    uint64_t _total_packets;
 
     int send_packets();
 
@@ -253,6 +263,8 @@ protected:
     uint32_t _rto_count;
     uint32_t _total_dupacks;
     uint32_t _sack_rtx;
+    uint32_t _rtx_seqno_count;
+    uint32_t _rtx_count;
 
     // Flow stuff
     uint32_t _pathid;

@@ -2,6 +2,7 @@
 #include "constant_cca.h"
 #include <iostream>
 #include <math.h>
+#include <bitset>
 
 ////////////////////////////////////////////////////////////////
 //  PACER
@@ -105,7 +106,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _dupacks = 0;
     _rtt = 0;
     _rto = timeFromMs(1);
-    _min_rto = timeFromUs((uint32_t)100);
+    _min_rto = timeFromUs((uint32_t)10);
     _max_rtt = 0;
     _mdev = 0;
     _recoverq = 0;
@@ -149,6 +150,12 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
 
     _repeated_nack_rtxs = 0;
     _sack_rtx = 0;
+
+    _total_pkt_delay = 0;
+    _total_packets = 0;
+
+    _rtx_seqno_count = 0;
+    _rtx_count = 0;
 }
 
 void
@@ -463,6 +470,7 @@ ConstantCcaSubflowSrc::retransmit_packet() {
     _pacer.just_sent();
 
     _packets_sent++;
+    _rtx_count ++;
 
     if(_RFC2988_RTO_timeout == timeInf) {// RFC2988 5.1 // the fact that with NACKs this broke concerns me - are we getting worse performance? I thought this was necessary since otherwise you won't timeout if you were first in fast retransmit, right? Let's test
         _RFC2988_RTO_timeout = eventlist().now() + _rto;
@@ -495,6 +503,7 @@ ConstantCcaSubflowSrc::retransmit_packet(uint64_t seqno) {
     _packets_sent++;
     _pending_retransmit.erase(seqno);
     _nack_rtxs++;
+    _rtx_seqno_count++;
     _pacer.just_sent();
     // _pending_retransmit = 0; // maybe this should be a list?
 
@@ -539,14 +548,22 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         uint64_t bitmap = p->bitmap();
         if (bitmap != 0 && (ackno == _last_acked && _dupacks ==_src._dupack_threshold) ) { // (eventlist().now() - _last_sack_update) > _rtt && 
             // std::cout << "bitmap: " << std::hex << bitmap << std::endl;
-            int last_one = 64 - log2(bitmap & -bitmap); // note: first 0 should always be in the first spot (otherwise, should have shifted left )
-            // std::cout << "last one: " << last_one << std::endl;
+            int last_one = 64 - log2(bitmap & -bitmap) - 1; // note: first 0 should always be in the first spot (otherwise, should have shifted left )
+            
             if (last_one > _src.ooo_limit()) {
+                // std::cout << "last one: " << last_one << std::endl;
+                // std::cout << "bit map: " << std::bitset<64>(bitmap).to_string() << std::endl;
                 // retransmit all missing 
                 int index = 0;
-                while (index < (last_one - _src.ooo_limit())) {
-                    if ((bitmap & (1 << (64-index))) == 0) {
+                while (index < (last_one - _src.ooo_limit())) { // Note: only rtxes pkts that are older than ooo limit, but does not reset dupacks, so waits for a new ack before doing this again?
+                    uint64_t bitmask = (1ULL << (63-index));
+                    // uint is_missing = (bitmap & bitmask);
+                    // std::cout << "bitmask " << std::bitset<64>(bitmask).to_string() << std::endl;
+                    // std::cout << "index " << index << " is missing: " << is_missing << std::endl;
+                    if ((bitmap & bitmask) == 0) {
                         retransmit_packet(ackno + index * mss());
+                        // std::cout << "ack no: " << ackno << std::endl;
+                        // std::cout << "flow " << _src._addr << "->" << _src._destination <<  " retransmitting pkt # " << ackno + index * mss() << std::endl;
                         _sack_rtx++;
                     }
                     index++;
@@ -555,7 +572,6 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
             }
         }
     }
-  
   
     ts_echo = p->ts_echo();
     uint32_t pathid = p->pathid();
@@ -585,6 +601,9 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
     assert(ackno >= _last_acked);  // no dups or reordering allowed in this simple simulator TODO: This should break 
     simtime_picosec delay = eventlist().now() - ts_echo;
     adjust_cwnd(delay, ackno);
+
+    _total_packets++;
+    _total_pkt_delay += delay;
 
 
     if (_src.plb()) {
@@ -886,6 +905,35 @@ ConstantCcaSrc::sack_rtxs() {
     uint32_t total = 0;
     for (int i = 0; i < (int)_subs.size(); i++) {
         total += _subs[i]->sack_rtxs();
+    }
+    return total;
+}
+
+simtime_picosec
+ConstantCcaSrc::pkt_delay() {
+    uint64_t total_pkts = 0;
+    simtime_picosec total_delay = 0;
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total_pkts += _subs[i]->total_pkts();
+        total_delay += _subs[i]->total_delay();
+    }
+    return total_delay / total_pkts;
+}
+
+uint32_t
+ConstantCcaSrc::retx_count() {
+    uint32_t total = 0;
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->retx_count();
+    }
+    return total;
+}
+
+uint32_t
+ConstantCcaSrc::retx_seqno_count() {
+    uint32_t total = 0;
+    for (int i = 0; i < (int)_subs.size(); i++) {
+        total += _subs[i]->retx_seqno_count();
     }
     return total;
 }
