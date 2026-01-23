@@ -94,6 +94,7 @@ int main(int argc, char **argv) {
     bool sack = false;
     int ooo_limit = 0;
     int dupack_thresh = 3;
+    bool get_pkt_delay = false;
 
     int i = 1;
     filename << "None";
@@ -194,6 +195,8 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-dup")){
             dupack_thresh = atoi(argv[i+1]);
             i++;
+        }  else if (!strcmp(argv[i],"-pktdelay")){
+            get_pkt_delay = true;
         } else if (!strcmp(argv[i],"-tsample")){
             tput_sample_time = timeFromUs((uint32_t)atoi(argv[i+1]));
             i++;            
@@ -626,14 +629,25 @@ int main(int argc, char **argv) {
     // for (src_i = swift_srcs.begin(); src_i != swift_srcs.end(); src_i++) {
     //     cout << "Src, sent: " << (*src_i)->_highest_dsn_sent << "[rtx: " << (*src_i)->_subs[0]. << "] nacks: " << (*src_i)->_nacks_received << " pulls: " << (*src_i)->_pulls_received << " paths: " << (*src_i)->_paths.size() << endl;
     // }
-    flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent,SACKRTXs" << endl;
-    for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
-        ConstantCcaSink* sink = (*src_i)->_sink;
-        simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-        flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," <<
-             time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << 
-             (*src_i)->packets_sent()  << "," << (*src_i)->sack_rtxs() <<  endl;
-    }
+    if (get_pkt_delay) {
+        flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent,SACKRTXs,PktDelay" << endl;
+        for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
+            ConstantCcaSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," <<
+                time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << 
+                (*src_i)->packets_sent()  << "," << (*src_i)->sack_rtxs() << "," << (*src_i)->pkt_delay() << endl;
+        }
+    } else {
+        flowlog << "Flow ID,Drops,Spurious Retransmits,Completion Time,RTOs,ReceivedBytes,NACKs,DupACKs,PacketsSent,SACKRTXs" << endl;
+        for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
+            ConstantCcaSink* sink = (*src_i)->_sink;
+            simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
+            flowlog << (*src_i)->_addr << "-" << (*src_i)->_destination << "," << (*src_i)->drops() << "," << sink->spurious_retransmits() << "," <<
+                time << "," << (*src_i)->rtos() << "," << sink->cumulative_ack() << "," << sink->nacks_sent() << "," << (*src_i)->total_dupacks() << "," << 
+                (*src_i)->packets_sent()  << "," << (*src_i)->sack_rtxs()<< endl;
+        }
+    }   
     flowlog.close();
     list <ConstantCcaSink*>::iterator sink_i;
     for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
