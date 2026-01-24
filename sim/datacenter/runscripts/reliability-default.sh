@@ -1,6 +1,10 @@
 #!/bin/bash
 
-# TCP Results in default
+# # TCP
+for i in {1..10}
+do
+    ./htsim_constcca -end 0 -tm ./connection_matrices/alltoall_128n_2MB.cm -nodes 128 -strat ecmp -hostlb spray -of ../../results/opt-4-2/reliability/default/tcp-0.75/opt-ata-128n-2MB-tcp0.75-spray-${i}.csv -ratecoef 0.75
+done
 
 # # Trim
 # for i in {1..10}

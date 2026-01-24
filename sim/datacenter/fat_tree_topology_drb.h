@@ -1,0 +1,326 @@
+// -*- c-basic-offset: 4; indent-tabs-mode: nil -*-
+#ifndef FAT_TREEDRB
+#define FAT_TREEDRB
+#include "main.h"
+#include "../randomqueue.h"
+#include "../pipe.h"
+#include "../config.h"
+#include "../loggers.h"
+#include "../network.h"
+#include "firstfit.h"
+#include "topology.h"
+#include "../logfile.h"
+#include "../eventlist.h"
+#include "../switch.h"
+#include <ostream>
+
+// Structure to hold parsed link information
+struct ParsedLinkInfo {
+    enum LinkType {
+        UNKNOWN,
+        TOR_AGG_LINK,   // Link between ToR (leaf) and Aggregate (spine) switch
+        AGG_CORE_LINK,  // Link between Aggregate (spine) and Core switch
+        TOR_HOST_LINK   // Link between ToR and Host
+    };
+    LinkType type = UNKNOWN;
+    int pod_id = -1;
+    int spine_idx_in_pod = -1; // Represents agg_switch_id_in_pod
+    int leaf_idx_in_pod = -1;  // Represents tor_switch_id_in_pod
+    int core_id_connected_to_spine = -1; // Represents core_switch_id
+
+    // For ToR-Host links, direct IDs
+    int tor_id = -1;
+    int host_id = -1;
+};
+
+// Helper function to parse a link description string (declaration)
+bool parse_link_description_string(const std::string& desc, ParsedLinkInfo& info);
+
+//#define N K*K*K/4
+
+#ifndef QT
+#define QT
+typedef enum {UNDEFINED, RANDOM, ECN, COMPOSITE, PRIORITY,
+              CTRL_PRIO, FAIR_PRIO, LOSSLESS, LOSSLESS_INPUT, LOSSLESS_INPUT_ECN,
+              COMPOSITE_ECN, COMPOSITE_ECN_DEF, ECN_BIG, COMPOSITE_ECN_LB, SWIFT_SCHEDULER, CONST_SCHEDULER, ECN_PRIO, AEOLUS, AEOLUS_ECN} queue_type;
+typedef enum {UPLINK, DOWNLINK} link_direction;
+#endif
+
+// avoid random constants
+#define TOR_TIER 0
+#define AGG_TIER 1
+#define CORE_TIER 2
+
+typedef enum {BLACK_HOLE_DROP, BLACK_HOLE_QUEUE} FailType;
+
+
+class FatTreeTopologyDRB: public Topology {
+public:
+    vector <Switch*> switches_lp;
+    vector <Switch*> switches_up;
+    vector <Switch*> switches_c;
+
+    // 3rd index is link number in bundle
+    vector< vector< vector<Pipe*> > > pipes_nc_nup;
+    vector< vector< vector<Pipe*> > > pipes_nup_nlp;
+    vector< vector< vector<Pipe*> > > pipes_nlp_ns;
+    vector< vector< vector<BaseQueue*> > > queues_nc_nup;
+    vector< vector< vector<BaseQueue*> > > queues_nup_nlp;
+    vector< vector< vector<BaseQueue*> > > queues_nlp_ns;
+
+    vector< vector< vector<Pipe*> > > pipes_nup_nc;
+    vector< vector< vector<Pipe*> > > pipes_nlp_nup;
+    vector< vector< vector<Pipe*> > > pipes_ns_nlp;
+    vector< vector< vector<BaseQueue*> > > queues_nup_nc;
+    vector< vector< vector<BaseQueue*> > > queues_nlp_nup;
+    vector< vector< vector<BaseQueue*> > > queues_ns_nlp;
+  
+    FirstFit* ff;
+    QueueLoggerFactory* _logger_factory;
+    EventList* _eventlist;
+    uint32_t failed_links;
+    queue_type _qt;
+    queue_type _sender_qt;
+    uint32_t flaky_links;
+    vector<std::string> _failed_link_descriptions;
+    vector<ParsedLinkInfo> _parsed_failed_links;
+
+    // For regular topologies, just use the constructor.  For custom topologies, load from a config file.
+    static FatTreeTopologyDRB* load(const char * filename, QueueLoggerFactory* logger_factory, EventList& eventlist,
+                                 mem_b queuesize, queue_type q_type, queue_type sender_q_type);
+
+    FatTreeTopologyDRB(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
+                    EventList* ev,FirstFit* f, queue_type qt, simtime_picosec latency, simtime_picosec switch_latency, queue_type snd = FAIR_PRIO);
+    FatTreeTopologyDRB(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
+                    EventList* ev,FirstFit* f, queue_type qt);      
+    FatTreeTopologyDRB(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
+                    EventList* ev,FirstFit* f, queue_type qt, uint32_t fail, double fail_pct = 0);
+    FatTreeTopologyDRB(uint32_t no_of_nodes, linkspeed_bps linkspeed, mem_b queuesize, QueueLoggerFactory* logger_factory,
+                    EventList* ev,FirstFit* f, queue_type qt, queue_type sender_qt, uint32_t fail, double fail_pct = 0, bool rts = false, simtime_picosec hoplatency = 0, 
+                    int flakylinks = 0, simtime_picosec interarrival = 0, simtime_picosec duration = 0, bool weighted = false, const vector<string>& failed_link_descs=std::vector<std::string>());
+
+    static void set_tier_parameters(int tier, int radix_up, int radix_down, mem_b queue_up, mem_b queue_down, int bundlesize, linkspeed_bps downlink_speed, int oversub);
+    void set_flaky_links(uint32_t num_links, simtime_picosec interarrival, simtime_picosec duration) {
+        flaky_links = num_links;
+        _link_loss_burst_interarrival_time = interarrival;
+        _link_loss_burst_duration = duration;
+    }
+
+    void init_network();
+    virtual vector<const Route*>* get_bidir_paths(uint32_t src, uint32_t dest, bool reverse);
+    Route* get_tor_route(uint32_t hostnum);
+    void add_host_port(uint32_t hostnum, flowid_t flow_id, PacketSink* host);
+
+    BaseQueue* alloc_src_queue(QueueLogger* q);
+    BaseQueue* alloc_queue(QueueLogger* q, mem_b queuesize, link_direction dir, int switch_tier, bool tor);
+    BaseQueue* alloc_queue(QueueLogger* q, uint64_t speed, mem_b queuesize,
+                           link_direction dir,  int switch_tier, bool tor);
+    static void set_tiers(uint32_t tiers) {_tiers = tiers;}
+    static uint32_t get_tiers() {return _tiers;}
+    static void set_latencies(simtime_picosec src_lp, simtime_picosec lp_up, simtime_picosec up_cs,
+                              simtime_picosec lp_switch, simtime_picosec up_switch, simtime_picosec core_switch) {
+        _link_latencies[0] = src_lp;
+        _link_latencies[1] = lp_up;
+        _link_latencies[2] = up_cs;
+        _switch_latencies[0] = lp_switch; // aka tor
+        _switch_latencies[1] = up_switch; // aka tor
+        _switch_latencies[2] = core_switch; // aka tor
+    }
+    static void set_podsize(int hosts_per_pod) {
+        _hosts_per_pod = hosts_per_pod;
+    }
+
+    void count_queue(Queue*);
+    void print_path(std::ofstream& paths,uint32_t src,const Route* route);
+    vector<uint32_t>* get_neighbours(uint32_t src) { return NULL;};
+    uint32_t no_of_nodes() const {return _no_of_nodes;}
+    uint32_t no_of_cores() const {return NCORE;}
+    uint32_t no_of_servers() const {return NSRV;}
+    uint32_t no_of_pods() const {return NPOD;}
+    uint32_t tor_switches_per_pod() const {return _tor_switches_per_pod;}
+    uint32_t agg_switches_per_pod() const {return _agg_switches_per_pod;}
+    uint32_t bundlesize(int tier) const {return _bundlesize[tier];}
+    uint32_t radix_up(int tier) const {return _radix_up[tier];}
+    uint32_t radix_down(int tier) const {return _radix_down[tier];}
+    uint32_t queue_up(int tier) const {return _queue_up[tier];}
+    uint32_t queue_down(int tier) const {return _queue_down[tier];}
+    bool weighted() {return _weighted;}
+    void set_weighted(bool weighted) {_weighted = weighted;}
+
+    void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+    void add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id, FailType failure_type);
+    void restore_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
+    void reset_routes(uint32_t switch_id);
+    void reset_weights();
+    void update_routes(uint32_t switch_id);
+    void update_weights(uint32_t switch_id, map<string,int> link_weights); // assumes only TORs for now
+    void update_weights_tor_podfailed(int failed_pod);
+    void update_weights_tor_otherpod(int failed_pod);
+    void populate_all_routes();
+    bool has_failures() const { return !_failed_link_descriptions.empty() || failed_links > 0; }
+
+    void add_symmetric_failures(int failures);
+    bool check_non_empty();
+
+    // add loggers to record total queue size at switches
+    virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 
+
+    Route* get_drb_selected_path(uint32_t src, uint32_t dest, uint32_t rr_index, bool reverse_path); 
+    uint32_t get_drb_path_count(uint32_t src, uint32_t dest);
+
+    std::vector<uint32_t> get_reachable_cores(uint32_t switch_id, int switch_type) const;
+    // Getter for valid spine switches cache
+    const std::map<std::pair<uint32_t, uint32_t>, std::vector<uint32_t>>& get_valid_spine_switches_cache() const {
+        return _valid_spine_switches_cache;
+    }
+
+    // Getter for valid core switches cache
+    const std::map<std::pair<uint32_t, uint32_t>, std::vector<uint32_t>>& get_valid_core_switches_cache() const {
+        return _valid_core_switches_cache;
+    }
+
+    // Returns the ToR number of the given host
+    uint32_t HOST_POD_SWITCH(uint32_t src){
+        return src/_radix_down[TOR_TIER];
+    }
+
+    // Returns ID within the pod of a given host
+    uint32_t HOST_POD_ID(uint32_t src){
+        if (_tiers == 3)
+            return src%_hosts_per_pod;
+        else
+            // only one pod in leaf-spine
+            return src;
+    }
+
+    // Returns the pod number of the given host
+    uint32_t HOST_POD(uint32_t src){
+        if (_tiers == 3) 
+            return src/_hosts_per_pod;
+        else
+            // only one pod in leaf-spine
+            return 0;
+    }
+
+    uint32_t MIN_POD_HOST(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return pod_id * _hosts_per_pod;
+    }
+
+    uint32_t MAX_POD_HOST(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return (pod_id + 1) * _hosts_per_pod - 1;
+    }
+
+    /*
+    uint32_t MIN_POD_ID(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return pod_id*K/2;
+    }
+    uint32_t MAX_POD_ID(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return (pod_id+1)*K/2-1;
+    }
+     */
+    uint32_t MIN_POD_TOR_SWITCH(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return pod_id * _tor_switches_per_pod;
+    }
+    uint32_t MAX_POD_TOR_SWITCH(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return (pod_id + 1) * _tor_switches_per_pod - 1;
+    }
+    uint32_t MIN_POD_AGG_SWITCH(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return pod_id * _agg_switches_per_pod;
+    }
+    uint32_t MAX_POD_AGG_SWITCH(uint32_t pod_id){
+        if (_tiers == 2) assert(pod_id == 0);
+        return (pod_id + 1) * _agg_switches_per_pod - 1;
+    }
+
+    // convert an agg switch ID to a pod ID
+    uint32_t AGG_SWITCH_POD_ID(uint32_t agg_switch_id) {
+        return agg_switch_id / _agg_switches_per_pod;
+    }
+    
+    //uint32_t getK() const {return K;}
+    uint32_t getNAGG() const {return NAGG;}
+
+    void activate();
+private:
+    map<Queue*,int> _link_usage;
+    static FatTreeTopologyDRB* load(istream& file, QueueLoggerFactory* logger_factory, EventList& eventlist,
+                                 mem_b queuesize, queue_type q_type, queue_type sender_q_type);
+    void set_linkspeeds(linkspeed_bps linkspeed);
+    void set_queue_sizes(mem_b queuesize);
+    int64_t find_lp_switch(Queue* queue);
+    int64_t find_up_switch(Queue* queue);
+    int64_t find_core_switch(Queue* queue);
+    int64_t find_destination(Queue* queue);
+    void set_params(uint32_t no_of_nodes);
+    void set_custom_params(uint32_t no_of_nodes);
+    void alloc_vectors();
+    uint32_t NCORE, NAGG, NTOR, NSRV, NPOD;
+    uint32_t _tor_switches_per_pod, _agg_switches_per_pod;
+    static uint32_t _tiers;
+
+    // _link_latencies[0] is the ToR->host latency.
+    static simtime_picosec _link_latencies[3];
+
+    // _switch_latencies[0] is the ToR switch latency.
+    static simtime_picosec _switch_latencies[3];
+
+    // How many uplinks to bundle from each node in a tier to the same
+    // node in the tier below.  Eg bundlesize[2] = 2 means two
+    // bundled links from Core to Upper pod switch (and vice versa)
+    //
+    // Note: we don't currently support bundling from the hosts to
+    // ToRs because transport needs to know for that to work.
+    static uint32_t _bundlesize[3];
+
+    // Linkspeed of each link in a switch tier to the tier below. ToRs are tier 0.
+    // Eg. _downlink_speeds[0] = 400Gbps indicates 400Gbps links from hosts
+    // to ToRs.
+    static linkspeed_bps _downlink_speeds[3];
+
+    // degree of oversubscription at tier.  Eg _oversub[TOR_TIER] = 3 implies 3x more bw to hosts than to agg switches.
+    static uint32_t _oversub[3];
+
+    // switch radix used.  Eg _radix_down[0] = 32 indicates 32 downlinks from ToRs.  _radix_up[2] should be zero in a 3-tier topology.  
+    static uint32_t _radix_down[3];
+    static uint32_t _radix_up[2];
+
+    // switch queue size used.  Eg _queue_down[0] = 32 indicates 32 downlinks from ToRs.  _queue_up[2] should be zero in a 3-tier topology.  
+    static mem_b _queue_down[3];
+    static mem_b _queue_up[2];
+
+    // number of hosts in a pod.  
+    static uint32_t _hosts_per_pod; 
+    
+    uint32_t _no_of_nodes;
+    simtime_picosec _hop_latency,_switch_latency;
+
+    double fail_bw_pct;
+    bool _rts;
+    simtime_picosec _link_loss_burst_interarrival_time;
+    simtime_picosec _link_loss_burst_duration;
+
+    bool _weighted;
+
+    // DRB route caching: maps (src, dest, rr_index) -> Route*
+    // This avoids recreating identical routes for the same pointer value
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t>, Route*> _drb_route_cache;
+
+    // Store pre-computed lists of valid spine switches for (src_tor, dest_tor) pairs (same pod, diff ToR)
+    std::map<std::pair<uint32_t, uint32_t>, std::vector<uint32_t>> _valid_spine_switches_cache;
+
+    // Store pre-computed lists of valid core switches for (src_tor, dest_tor) pairs (diff pods)
+    // Keying by (src_tor, dest_tor) to store valid core switches for traffic between these specific ToRs.
+    std::map<std::pair<uint32_t, uint32_t>, std::vector<uint32_t>> _valid_core_switches_cache;
+
+    // Helper to check if a path segment is currently reachable
+    bool _is_path_reachable(const std::vector<PacketSink*>& path_elements);
+};
+
+#endif

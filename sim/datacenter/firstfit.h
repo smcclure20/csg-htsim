@@ -3,9 +3,9 @@
 #define firstfit
 
 #include "main.h"
-#include "tcp.h"
-#include "randomqueue.h"
-#include "eventlist.h"
+#include "../tcp.h"
+#include "../randomqueue.h"
+#include "../eventlist.h"
 #include <list>
 #include <map>
 

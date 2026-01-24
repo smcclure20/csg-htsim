@@ -1,8 +1,8 @@
 // -*- c-basic-offset: 4; indent-tabs-mode: nil -*-
 #ifndef TOPOLOGY
 #define TOPOLOGY
-#include "network.h"
-#include "loggers.h"
+#include "../network.h"
+#include "../loggers.h"
 
 class Topology {
 public:

@@ -3,11 +3,11 @@
 #define shortflows
 
 #include "main.h"
-#include "tcp.h"
-#include "randomqueue.h"
-#include "logfile.h"
-#include "eventlist.h"
-#include "tcp_transfer.h"
+#include "../tcp.h"
+#include "../randomqueue.h"
+#include "../logfile.h"
+#include "../eventlist.h"
+#include "../tcp_transfer.h"
 #include <list>
 #include <map>
 #include "connection_matrix.h"

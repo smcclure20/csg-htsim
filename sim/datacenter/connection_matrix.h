@@ -3,11 +3,11 @@
 #define connection_matrix
 
 #include "main.h"
-#include "tcp.h"
+#include "../tcp.h"
 #include "topology.h"
-#include "randomqueue.h"
+#include "../randomqueue.h"
 #include "fat_tree_switch.h"
-#include "eventlist.h"
+#include "../eventlist.h"
 #include <list>
 #include <map>
 

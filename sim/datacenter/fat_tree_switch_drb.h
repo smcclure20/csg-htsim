@@ -1,12 +1,12 @@
 // -*- c-basic-offset: 4; indent-tabs-mode: nil -*-
-#ifndef _FATTREESWITCH_H
-#define _FATTREESWITCH_H
+#ifndef _FATTREESWITCHDRB_H
+#define _FATTREESWITCHDRB_H
 
 #include "../switch.h"
 #include "../callback_pipe.h"
 #include <unordered_map>
 
-class FatTreeTopology;
+class FatTreeTopologyDRB;
 
 /*
  * Copyright (C) 2013-2014 Universita` di Pisa. All rights reserved.
@@ -59,7 +59,7 @@ class FatTreeTopology;
         c -= a; c -= b; c ^= (b >> 15);         \
     } while (/*CONSTCOND*/0)
 
-static inline uint32_t freeBSDHash(uint32_t target1, uint32_t target2 = 0, uint32_t target3 = 0)
+static inline uint32_t freeBSDHashDRB(uint32_t target1, uint32_t target2 = 0, uint32_t target3 = 0)
 {
     uint32_t a = 0x9e3779b9, b = 0x9e3779b9, c = 0; // hask key
         
@@ -72,30 +72,30 @@ static inline uint32_t freeBSDHash(uint32_t target1, uint32_t target2 = 0, uint3
 
 #undef MIX
 
-class FlowletInfo {
+class FlowletInfoDRB {
 public:
     uint32_t _egress;
     simtime_picosec _last;
 
-    FlowletInfo(uint32_t egress,simtime_picosec lasttime) {_egress = egress; _last = lasttime;};
+    FlowletInfoDRB(uint32_t egress,simtime_picosec lasttime) {_egress = egress; _last = lasttime;};
 
 };
 
-class FatTreeSwitch : public Switch {
+class FatTreeSwitchDRB : public Switch {
 public:
     enum switch_type {
         NONE = 0, TOR = 1, AGG = 2, CORE = 3
     };
 
     enum routing_strategy {
-        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5
+        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5, PER_POD_IWRR = 6, PER_POD_IWRR_EXP = 7, PER_POD_IWRR_DET = 8, PER_POD_IWRR_A_RR = 9, PER_POD_IWRR_A_RAND = 10, CUMUL = 13, W_ECMP = 14, FIB_LLSS = 15
     };
 
     enum sticky_choices {
         PER_PACKET = 0, PER_FLOWLET = 1
     };
 
-    FatTreeSwitch(EventList& eventlist, string s, switch_type t, uint32_t id,simtime_picosec switch_delay, FatTreeTopology* ft);
+    FatTreeSwitchDRB(EventList& eventlist, string s, switch_type t, uint32_t id,simtime_picosec switch_delay, FatTreeTopologyDRB* ft);
   
     virtual void receivePacket(Packet& pkt);
     virtual Route* getNextHop(Packet& pkt, BaseQueue* ingress_port);
@@ -147,13 +147,13 @@ public:
 private:
     switch_type _type;
     Pipe* _pipe;
-    FatTreeTopology* _ft;
+    FatTreeTopologyDRB* _ft;
     
     //CAREFUL: can't always have a single FIB for all up destinations when there are failures!
     vector<FibEntry*>* _uproutes;
     vector<int> _up_destinations;
 
-    unordered_map<uint32_t,FlowletInfo*> _flowlet_maps;
+    unordered_map<uint32_t,FlowletInfoDRB*> _flowlet_maps;
 
     static unordered_map<BaseQueue*,uint32_t> _port_flow_counts;
 
@@ -164,6 +164,28 @@ private:
     unordered_map<Packet*,bool> _packets;
 
     map<string,int> _switch_weights;
+
+    // LLSS State
+    std::vector<std::vector<BaseQueue*>> _llss_schedules;
+    std::vector<uint32_t> _llss_pointers;
+    std::vector<std::map<BaseQueue*, int>> _cached_weights;
+    std::mt19937 _rng;
+    std::vector<BaseQueue*> _generate_llss_schedule(const std::map<BaseQueue*, int>& weights, bool exp_mode);
+    std::map<BaseQueue*, int> _get_llss_leaf_weights(uint32_t dest_pod_id);
+    std::map<BaseQueue*, int> _get_llss_spine_weights(uint32_t dest_pod_id);
+    bool _is_path_valid(uint32_t dst, BaseQueue* port);
+
+    static int _gcd(int a, int b) {
+        while (b) {
+            int t = b;
+            b = a % b;
+            a = t;
+        }
+        return a;
+    }
+
+    std::map<std::pair<uint32_t, bool>, std::map<BaseQueue*, int>> _llss_packet_counts;
+    std::vector<std::vector<int8_t>> _path_validity_cache;
 };
 
 #endif
