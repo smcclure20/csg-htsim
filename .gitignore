@@ -8,3 +8,5 @@
 *#
 *.o
 .DS_store
+runscripts25/*
+sim/datacenter/runscripts/*
