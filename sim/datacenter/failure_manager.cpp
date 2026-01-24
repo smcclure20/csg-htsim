@@ -31,6 +31,10 @@ void FailureManager::setReturnTime(simtime_picosec link_time, simtime_picosec ro
 void FailureManager::doNextEvent() { 
     if (!_link_failed && _eventlist.now() >= _fail_time) {
         std::cout << "Failing link " << _switch_type << " " << _switch_id << ": link " << _link_number <<  " at time " << _eventlist.now() << std::endl;
+        if (_fail_time == 0) { // TODO: This should be for any fail time before when the first packet could get to a node with a failure
+            _ft->populate_all_routes();
+            std::cout << "Populating routes before the failure so that they are not accurate after" << std::endl;
+        }
         _ft->add_failed_link(_switch_type, _switch_id, _link_number, _failure_type);
         _link_failed = true;
         if (_route_update_time != 0) {
