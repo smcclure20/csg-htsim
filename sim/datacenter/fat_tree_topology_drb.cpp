@@ -1159,6 +1159,30 @@ void FatTreeTopologyDRB::init_network(){
         }
     }
 
+    /*    for (uint32_t i = 0;i<NK;i++){
+          for (uint32_t j = 0;j<NC;j++){
+          printf("%p/%p ",queues_nup_nc[i][agg], queues_nc_nup[agg][i]);
+          }
+          printf("\n");
+          }*/
+
+    precompute_drb_paths();
+    
+    //init thresholds for lossless operation
+    if (_qt==LOSSLESS) {
+        for (uint32_t j=0;j<NTOR;j++){
+            switches_lp[j]->configureLossless();
+        }
+        for (uint32_t j=0;j<NAGG;j++){
+            switches_up[j]->configureLossless();
+        }
+        for (uint32_t j=0;j<NCORE;j++){
+            switches_c[j]->configureLossless();
+        }
+    }
+}
+
+void FatTreeTopologyDRB::precompute_drb_paths() {
     // --- DRB: Pre-compute valid spine/core switches based on static failures ---
     // This happens after all links are created and initial failures are applied.
 
@@ -1239,26 +1263,6 @@ void FatTreeTopologyDRB::init_network(){
         }
     }
     // --- End DRB Pre-computation ---
-
-    /*    for (uint32_t i = 0;i<NK;i++){
-          for (uint32_t j = 0;j<NC;j++){
-          printf("%p/%p ",queues_nup_nc[i][agg], queues_nc_nup[agg][i]);
-          }
-          printf("\n");
-          }*/
-    
-    //init thresholds for lossless operation
-    if (_qt==LOSSLESS) {
-        for (uint32_t j=0;j<NTOR;j++){
-            switches_lp[j]->configureLossless();
-        }
-        for (uint32_t j=0;j<NAGG;j++){
-            switches_up[j]->configureLossless();
-        }
-        for (uint32_t j=0;j<NCORE;j++){
-            switches_c[j]->configureLossless();
-        }
-    }
 }
 
 void FatTreeTopologyDRB::add_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id){

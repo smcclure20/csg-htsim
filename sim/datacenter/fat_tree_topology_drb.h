@@ -167,6 +167,7 @@ public:
 
     Route* get_drb_selected_path(uint32_t src, uint32_t dest, uint32_t rr_index, bool reverse_path); 
     uint32_t get_drb_path_count(uint32_t src, uint32_t dest);
+    void precompute_drb_paths();
 
     std::vector<uint32_t> get_reachable_cores(uint32_t switch_id, int switch_type) const;
     // Getter for valid spine switches cache

@@ -57,6 +57,7 @@ void FailureManager::doNextEvent() {
     if (_route_update_time != 0 ) {
         if (!_routes_updated && _eventlist.now() >= _route_update_time) {
             std::cout << "Updating routes " << _eventlist.now() << std::endl;
+            _ft->precompute_drb_paths(); // update drb paths
             _ft->update_routes(_switch_id);
             _routes_updated = true;
             uint32_t podpos = _switch_id % _ft->agg_switches_per_pod();

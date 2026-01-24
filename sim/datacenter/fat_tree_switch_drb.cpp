@@ -73,19 +73,21 @@ void FatTreeSwitchDRB::receivePacket(Packet& pkt){
         // Check if the packet has a full source route that we should follow (e.g. from DRB).
         // We identify this by the route length. A hop-by-hop route has size 3.
         if (pkt.route() && pkt.route()->size() > 4 && pkt.nexthop() < pkt.route()->size() && _strategy != ADAPTIVE_ROUTING) {
-            
+            if (pkt.nexthop() == NULL) {
+                cout << "Dropping DRB packet with src:dst" << pkt.src() << "->" << pkt.dst() << endl;
+                _packets.erase(&pkt);
+                pkt.free(); // this is a black hole; drop the packet
+                return;
+            }
             _pipe->receivePacket(pkt);
             return;
         }
 
         const Route * nh = getNextHop(pkt,NULL);
         if (nh == NULL) {
-            
-            uint32_t simplified_flow_num = pkt.flow_id();
-            if (simplified_flow_num > 1000000000) {
-                simplified_flow_num -= 1000000000;
-            }
-            exit(1);
+            _packets.erase(&pkt);
+            pkt.free(); // this is a black hole; drop the packet
+            return;
         }
         //set next hop which is peer switch.
         pkt.set_route(*nh);
