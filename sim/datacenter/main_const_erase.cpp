@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
     int flaky_links = 0;
     simtime_picosec latency = 0;
     bool get_pkt_delay = false;
+    bool assume_no_loss = false;
 
     int i = 1;
     filename << "None";
@@ -194,6 +195,8 @@ int main(int argc, char **argv) {
             i++;
         }  else if (!strcmp(argv[i],"-pktdelay")){
             get_pkt_delay = true;
+        } else if (!strcmp(argv[i],"-lossless")){
+            assume_no_loss = true;
         } else if (!strcmp(argv[i],"-hostlb")){
             if (!strcmp(argv[i+1], "spray")) {
                 host_lb = SPRAY;
@@ -370,6 +373,10 @@ int main(int argc, char **argv) {
         if (crt->size>0){
             sender->set_flowsize(crt->size, k);
         } 
+
+        if (assume_no_loss) {
+            sender->set_assume_lossless(assume_no_loss);
+        }
                 
         if (host_lb == PLB) {
             sender->enable_plb();
@@ -466,14 +473,4 @@ int main(int argc, char **argv) {
     }
 
     flowlog.close();
-    list <ConstantErasureCcaSink*>::iterator sink_i;
-    for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes" << endl;
-        if ((*sink_i)->cumulative_ack() < 2004000) { // todo: change thsi
-            cout << "Incomplete flow " << endl;
-            ConstantErasureCcaSink* sink = (*sink_i);
-            ConstantErasureCcaSrc* counterpart_src = sink->_src;
-            cout << "Src, sent: " << counterpart_src->_packets_sent << "; ACKED " << counterpart_src->packets_acked() << endl;
-        }
-    }
 }

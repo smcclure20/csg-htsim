@@ -165,7 +165,7 @@ ConstantErasureCcaSrc::send_packets() {
             return 0;
         }
         //if ()
-        if (_final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
+        if (!_assume_lossless && _final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
             if (_pacer.allow_send()) {
                 bool sent = send_next_packet();
                 if (sent) {
