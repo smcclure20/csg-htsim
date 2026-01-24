@@ -106,7 +106,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _dupacks = 0;
     _rtt = 0;
     _rto = timeFromMs(1);
-    _min_rto = timeFromUs((uint32_t)10);
+    _min_rto = timeFromUs((uint32_t)2);
     _max_rtt = 0;
     _mdev = 0;
     _recoverq = 0;
@@ -550,18 +550,19 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
             // std::cout << "bitmap: " << std::hex << bitmap << std::endl;
             int last_one = 64 - log2(bitmap & -bitmap) - 1; // note: first 0 should always be in the first spot (otherwise, should have shifted left )
             
-            if (last_one > _src.ooo_limit()) {
+            if (last_one > _src.ooo_limit() ) {
                 // std::cout << "last one: " << last_one << std::endl;
                 // std::cout << "bit map: " << std::bitset<64>(bitmap).to_string() << std::endl;
                 // retransmit all missing 
                 int index = 0;
                 while (index < (last_one - _src.ooo_limit())) { // Note: only rtxes pkts that are older than ooo limit, but does not reset dupacks, so waits for a new ack before doing this again?
                     uint64_t bitmask = (1ULL << (63-index));
-                    // uint is_missing = (bitmap & bitmask);
+                    // uint is_missing = (bitmap & bitmask) == 0;
                     // std::cout << "bitmask " << std::bitset<64>(bitmask).to_string() << std::endl;
                     // std::cout << "index " << index << " is missing: " << is_missing << std::endl;
                     if ((bitmap & bitmask) == 0) {
                         retransmit_packet(ackno + index * mss());
+                        _dupacks = 0;
                         // std::cout << "ack no: " << ackno << std::endl;
                         // std::cout << "flow " << _src._addr << "->" << _src._destination <<  " retransmitting pkt # " << ackno + index * mss() << std::endl;
                         _sack_rtx++;
@@ -666,6 +667,7 @@ ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec perio
     //      <<  get_id() << endl;
 
     _rto_count++;
+    // cout << "RTO at " << _src._addr << "->" << _src._destination  << " # " << _rto_count << " (rto: " << _rto << ")" << std::endl;
 
     // here we can run into phase effects because the timer is checked
     // only periodically for ALL flows but if we keep the difference
