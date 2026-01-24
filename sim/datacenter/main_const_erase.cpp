@@ -342,25 +342,15 @@ int main(int argc, char **argv) {
 
     // ConstEraseRtxTimerScanner rtxScanner(timeFromUs(0.01), eventlist);
 
-    for (uint32_t c = 0; c < all_conns->size(); c++){
-        connection* crt = all_conns->at(c);
+    for (uint32_t c = 0; c < all_conns->size() * no_of_subflows; c++){
+        connection* crt = all_conns->at((int)(c / no_of_subflows));
         uint32_t src = crt->src;
         uint32_t dest = crt->dst;
+        int subflow_num = c % no_of_subflows;
         
         connID++;
-        // if (!net_paths[src][dest]) {
-        //     vector<const Route*>* paths = top->get_paths(src,dest);
-        //     net_paths[src][dest] = paths;
-        //     for (uint32_t p = 0; p < paths->size(); p++) {
-        //         routes.push_back((*paths)[p]);
-        //     }
-        // }
-        // if (!net_paths[dest][src]) {
-        //     vector<const Route*>* paths = top->get_paths(dest,src);
-        //     net_paths[dest][src] = paths;
-        // }
 
-        double rate = (linkspeed / ((double)all_conns->size() / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
+        double rate = (linkspeed / ((double)all_conns->size() * no_of_subflows / no_of_nodes)) / (packet_size * 8); // assumes all nodes have the same number of connections
         simtime_picosec interpacket_delay = timeFromSec(1. / (rate * rate_coef)); //+ rand() % (2*(no_of_nodes-1)); // just to keep them not perfectly in sync
         sender = new ConstantErasureCcaSrc(eventlist, src, interpacket_delay, NULL);  
         // rtxScanner.registerFlow(sender);
@@ -391,9 +381,9 @@ int main(int argc, char **argv) {
         sink = new ConstantErasureCcaSink();
         sinks.push_back(sink);
 
-        sender->setName("constcca_" + ntoa(src) + "_" + ntoa(dest));
+        sender->setName("constcca_" + ntoa(src) + "_" + ntoa(dest) + "_sf" + std::to_string(subflow_num));
 
-        sink->setName("constcca_sink_" + ntoa(src) + "_" + ntoa(dest));
+        sink->setName("constcca_sink_" + ntoa(src) + "_" + ntoa(dest) + "_sf" + std::to_string(subflow_num));
 
           
         if (route_strategy != SOURCE_ROUTE) {
