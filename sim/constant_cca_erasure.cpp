@@ -156,6 +156,7 @@ ConstantErasureCcaSrc::send_packets() {
     if(is_complete()) {
         if (_completion_time == 0) {
             _completion_time = eventlist().now();
+            _pacer.cancel();
         }
         return 0;
     } else if (_current_seqno - _approx_lost >= _flow_size) { // final bdp (inflight+bytes_acked) (_current_seqno - _approx_lost >= _flow_size) 
@@ -303,7 +304,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     p->free();
 
     _inflight = _current_seqno - _highest_ack; // This is an approximation (may be more due to reordering)
-    _approx_lost = seqno - _bytes_acked;
+    _approx_lost = (seqno - 1 + mss()) - _bytes_acked;
     // If have sent everything, need to check that the num lost is not increasing
 
     _timer_start = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
@@ -314,6 +315,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
 
     if (is_complete() && _completion_time == 0) {
         _completion_time = eventlist().now();
+        _pacer.cancel();
     }
 
     // if (((_flow_size - _bytes_acked)/mss() >= (uint64_t)(rtt / _pacing_delay)) && (!is_complete())) {

@@ -63,7 +63,7 @@ public:
     void startflow();
 
     void set_flowsize(uint64_t flow_size_in_bytes, int erasure_k) {
-        _flow_size = flow_size_in_bytes + erasure_k * mss();
+        _flow_size = flow_size_in_bytes + (erasure_k * mss());
         // cout << "Setting flow size to " << _flow_size << endl;
     }
 
