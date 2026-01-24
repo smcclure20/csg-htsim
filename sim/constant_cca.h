@@ -58,7 +58,7 @@ public:
     // virtual void receivePacket(Packet& pkt);
 
     void set_flowsize(uint64_t flow_size_in_bytes) {
-        _flow_size = flow_size_in_bytes + mss();
+        _flow_size = flow_size_in_bytes;
         // cout << "Setting flow size to " << _flow_size << endl;
     }
 
@@ -172,7 +172,7 @@ public:
     virtual void receivePacket(Packet& pkt);
     void update_rtt(simtime_picosec delay);
     void adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t ackno);
-    void handle_ack(ConstantCcaAck::seq_t ackno);
+    void handle_ack(ConstantCcaAck::seq_t ackno, uint64_t bitmap = 0);
     void move_path_flow_label();
     void doNextEvent();
     void rtx_timer_hook(simtime_picosec now, simtime_picosec period);
@@ -265,6 +265,7 @@ protected:
     uint32_t _sack_rtx;
     uint32_t _rtx_seqno_count;
     uint32_t _rtx_count;
+    uint32_t _rto_last_pkt_count=0;
 
     // Flow stuff
     uint32_t _pathid;

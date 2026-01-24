@@ -179,6 +179,7 @@ ConstantCcaSubflowSrc::update_rtt(simtime_picosec delay) {
         }
         _min_rtt = min(_min_rtt, delay);
         _max_rtt = max(_max_rtt, delay);
+        // _rto = _max_rtt + 4*_mdev;
         // _dupack_threshold = (int)((_max_rtt - _min_rtt) / _pacing_delay) + 1;
         // if (_dupack_threshold < 3) {
         //     _dupack_threshold = 3;
@@ -205,7 +206,7 @@ ConstantCcaSubflowSrc::adjust_cwnd(simtime_picosec delay, ConstantCcaAck::seq_t 
 }
 
 void
-ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
+ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno, uint64_t bitmap) {
     simtime_picosec now = eventlist().now();
     if (ackno > _last_acked) { // a brand new ack
         _RFC2988_RTO_timeout = now + _rto;// RFC 2988 5.3
@@ -298,10 +299,39 @@ ConstantCcaSubflowSrc::handle_ack(ConstantCcaAck::seq_t ackno) {
     }
   
     // begin fast recovery
+     if (_src.sack()) {
+        if (bitmap != 0 && (ackno == _last_acked && _dupacks ==_src._dupack_threshold) ) { // (eventlist().now() - _last_sack_update) > _rtt && 
+            // std::cout << "bitmap: " << std::hex << bitmap << std::endl;
+            int last_one = 64 - log2(bitmap & -bitmap) - 1; // note: first 0 should always be in the first spot (otherwise, should have shifted left )
+            
+            if (last_one > _src.ooo_limit() ) {
+                // std::cout << "last one: " << last_one << std::endl;
+                // std::cout << "bit map: " << std::bitset<64>(bitmap).to_string() << std::endl;
+                // retransmit all missing 
+                int index = 0;
+                while (index < last_one ) { // Note: only rtxes pkts that are older than ooo limit, but does not reset dupacks, so waits for a new ack before doing this again?
+                    uint64_t bitmask = (1ULL << (63-index));
+                    // uint is_missing = (bitmap & bitmask) == 0;
+                    // std::cout << "bitmask " << std::bitset<64>(bitmask).to_string() << std::endl;
+                    // std::cout << "index " << index << " is missing: " << is_missing << std::endl;
+                    if ((bitmap & bitmask) == 0) {
+                        retransmit_packet(ackno + index * mss() + 1);
+                        _RFC2988_RTO_timeout = timeInf; // reset since retransmitting to avoid an rto
+                        // std::cout << "ack no: " << ackno << std::endl;
+                        // std::cout << "flow " << _src._addr << "->" << _src._destination <<  " retransmitting pkt # " << ackno + index * mss() << std::endl;
+                        _sack_rtx++;
+                    }
+                    index++;
+                }
+                _last_sack_update = eventlist().now();
+            }
+        }
+    } else {
   
     //only count drops in CA state
     _drops++;
     retransmit_packet();
+    }
     _in_fast_recovery = true;
     _recoverq = _highest_sent; // _recoverq is the value of the
     // first ACK that tells us things
@@ -325,11 +355,13 @@ ConstantCcaSubflowSrc::send_packets() {
 
     if (_pending_retransmit.size() > 0) { // should also check pacer? How else could this be called?
         // Only do a pending retransmit if it's not already been acked
-        while (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() <= _last_acked && *_pending_retransmit.begin()-1 <= _highest_sent) {
+        while (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() <= _last_acked && *_pending_retransmit.begin() <= _highest_sent + 1) {
+            // cout << "Erasing " << *_pending_retransmit.begin() << std::endl;
             _pending_retransmit.erase(_pending_retransmit.begin());
         }
-        if (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() > _last_acked && *_pending_retransmit.begin()-1 <= _highest_sent) {
+        if (_pending_retransmit.size() > 0 && *_pending_retransmit.begin() > _last_acked && *_pending_retransmit.begin() <= _highest_sent + 1) {
             uint64_t seqno = *_pending_retransmit.begin();
+            // cout << "Retransmitting " << seqno << std::endl;
             retransmit_packet(seqno);
             return 1;
         }
@@ -393,14 +425,18 @@ ConstantCcaSubflowSrc::send_next_packet() {
 
     ConstantCcaPacket::seq_t dsn;
     if (!_dsn_map.empty() && _dsn_map.count(_highest_sent + 1) > 0) {
-        dsn = _dsn_map[_highest_sent+1];
+        dsn = _dsn_map[_highest_sent + 1];
         if (dsn == 0) {
             cout << "highest_sent " << _highest_sent << " last_acked " << _last_acked << " ,highest in map: " << (uint64_t) prev(_dsn_map.end())->first << endl;
             assert(false);
         }
     } else {
-        dsn = _src._highest_dsn_sent+1;
-        _dsn_map[_highest_sent+1] = dsn;
+        dsn = _src._highest_dsn_sent + 1;
+        if (dsn == 0) {
+            cout << "highest_sent " << _highest_sent << " last_acked " << _last_acked << " ,highest dsn snt: " << _src._highest_dsn_sent<< endl;
+            assert(false);
+        }
+        _dsn_map[_highest_sent + 1] = dsn;
         _src._highest_dsn_sent += mss();
         _highest_sent_abs = _highest_sent; // it can be possible for neither hsent or recoverq to be the actual highest sent (multiple losses before recovering), so we need this
     }
@@ -453,17 +489,19 @@ ConstantCcaSubflowSrc::retransmit_packet() {
         return;
     }
     if (!_pacer.allow_send()) {
-        _pending_retransmit.insert(_last_acked+1);
+        // cout << "Pacer not allowing an rtx. Inserting " << _last_acked + 1 << std::endl;
+        _pending_retransmit.insert(_last_acked + 1);
         return;
-    }
+    } 
+
     // if (!_pacer.allow_send()) {
     //     deferred_retransmit = true;
     //     return;
     // }
     // cout << timeAsUs(eventlist().now()) << " " << nodename() << " retransmit_packet " << endl;
     // cout << timeAsUs(eventlist().now()) << " sending seqno " << _last_acked+1 << endl;
-    ConstantCcaPacket::seq_t dsn = _dsn_map[_last_acked+1];
-    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked+1, dsn, mss(), _src._destination, _src._addr, _pathid); // TODO: should probably increment the path label after sending here too 
+    ConstantCcaPacket::seq_t dsn = _dsn_map[_last_acked + 1];
+    ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, _last_acked + 1, dsn, mss(), _src._destination, _src._addr, _pathid); // TODO: should probably increment the path label after sending here too 
 
     p->set_ts(eventlist().now());
     p->sendOn();
@@ -479,21 +517,11 @@ ConstantCcaSubflowSrc::retransmit_packet() {
 
 void 
 ConstantCcaSubflowSrc::retransmit_packet(uint64_t seqno) {
-    // if (_repeated_nack_rtxs > 1 ) {
-    //     _pacer.cancel();
-    //     _nack_backoff = _nack_backoff * 2;
-    //     if (_nack_backoff > timeFromMs(1)) {
-    //         _nack_backoff = timeFromMs(1);
-    //     }
-    //     _pacer.schedule_send(_nack_backoff);
-    // } else {
-    //     _nack_backoff = _pacing_delay;
-    // }
     if (!_pacer.allow_send()) {
         _pending_retransmit.insert(seqno);
         return;
     }
-    _repeated_nack_rtxs++;
+    
     ConstantCcaPacket::seq_t dsn = _dsn_map[seqno];
     ConstantCcaPacket* p = ConstantCcaPacket::newpkt(_flow, *_route, seqno, dsn, mss(), _src._destination, _src._addr, _pathid);
 
@@ -544,35 +572,6 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
         return;
     }
 
-    if (_src.sack()) {
-        uint64_t bitmap = p->bitmap();
-        if (bitmap != 0 && (ackno == _last_acked && _dupacks ==_src._dupack_threshold) ) { // (eventlist().now() - _last_sack_update) > _rtt && 
-            // std::cout << "bitmap: " << std::hex << bitmap << std::endl;
-            int last_one = 64 - log2(bitmap & -bitmap) - 1; // note: first 0 should always be in the first spot (otherwise, should have shifted left )
-            
-            if (last_one > _src.ooo_limit() ) {
-                // std::cout << "last one: " << last_one << std::endl;
-                // std::cout << "bit map: " << std::bitset<64>(bitmap).to_string() << std::endl;
-                // retransmit all missing 
-                int index = 0;
-                while (index < (last_one - _src.ooo_limit())) { // Note: only rtxes pkts that are older than ooo limit, but does not reset dupacks, so waits for a new ack before doing this again?
-                    uint64_t bitmask = (1ULL << (63-index));
-                    // uint is_missing = (bitmap & bitmask) == 0;
-                    // std::cout << "bitmask " << std::bitset<64>(bitmask).to_string() << std::endl;
-                    // std::cout << "index " << index << " is missing: " << is_missing << std::endl;
-                    if ((bitmap & bitmask) == 0) {
-                        retransmit_packet(ackno + index * mss());
-                        _dupacks = 0;
-                        // std::cout << "ack no: " << ackno << std::endl;
-                        // std::cout << "flow " << _src._addr << "->" << _src._destination <<  " retransmitting pkt # " << ackno + index * mss() << std::endl;
-                        _sack_rtx++;
-                    }
-                    index++;
-                }
-                _last_sack_update = eventlist().now();
-            }
-        }
-    }
   
     ts_echo = p->ts_echo();
     uint32_t pathid = p->pathid();
@@ -646,7 +645,7 @@ ConstantCcaSubflowSrc::receivePacket(Packet& pkt)
 
     _src.update_dsn_ack(ds_ackno);
 
-    handle_ack(ackno);
+    handle_ack(ackno, p->bitmap());
 }
 
 void
@@ -666,14 +665,14 @@ ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec perio
     //      << " CWND "<< _const_cwnd/mss() << " FAST RECOVERY? " <<         _in_fast_recovery << " Flow ID " 
     //      <<  get_id() << endl;
 
-    _rto_count++;
-    // cout << "RTO at " << _src._addr << "->" << _src._destination  << " # " << _rto_count << " (rto: " << _rto << ")" << std::endl;
-
     // here we can run into phase effects because the timer is checked
     // only periodically for ALL flows but if we keep the difference
     // between scanning time and real timeout time when restarting the
     // flows we should minimize them !
     if(!_rtx_timeout_pending) {
+        _rto_count++;
+        // cout << "RTO at " << _src._addr << "->" << _src._destination  << " # " << _rto_count << " (rto: " << _rto << ")" << std::endl;
+
         _rtx_timeout_pending = true;
 
         // check the timer difference between the event and the real value
@@ -686,29 +685,30 @@ ConstantCcaSubflowSrc::rtx_timer_hook(simtime_picosec now, simtime_picosec perio
         // carry over the difference for restarting
         simtime_picosec rtx_off = (period - too_late)/200;
  
+        // cout << "Scheduling RTO handling at " << _src._addr << "->" << _src._destination  << " at time +" << rtx_off << std::endl;
+
         eventlist().sourceIsPendingRel(*this, rtx_off);
 
         //reset our rtx timerRFC 2988 5.5 & 5.6
 
         _rto *= 2;
-        //if (_rto > timeFromMs(1000))
-        //  _rto = timeFromMs(1000);
+        // if (_last_acked == _src._flow_size - mss()) {
+        //     _rto_last_pkt_count ++;
+        //     std::cout << "RTO at " << eventlist().now() << " flow " << _src._addr << "->" << _src._destination << " RTO set to " << _rto << std::endl;
+        // }
+        // if (_rto > 4 * _rtt)
+        //     _rto = 4 * _rtt;
         _RFC2988_RTO_timeout = now + _rto;
     }
 }
 
 void ConstantCcaSubflowSrc::doNextEvent() {
-    if (!_established) {
-        //cout << "Establishing connection" << endl;
-        _src.startflow();
-        return;
-    }
     if(_src._highest_dsn_ack >= _src._flow_size) {
         _RFC2988_RTO_timeout = timeInf;
         return;
     }
     if(_rtx_timeout_pending) {
-        // _rto_times.push_back(eventlist().now());
+        _rto_times.push_back(eventlist().now());
         _rtx_timeout_pending = false;
 
         _in_fast_recovery = false;
@@ -719,13 +719,23 @@ void ConstantCcaSubflowSrc::doNextEvent() {
 
         _dupacks = 0;
         _retransmit_cnt++;
-        if (_retransmit_cnt >= _rtx_reset_threshold) {
-            _const_cwnd = _min_cwnd;
-        } 
 
         if (_const_cwnd < _min_cwnd) {
             _const_cwnd = _min_cwnd;
         }
+        
+        // In case we have not sent any other packets while waiting on this RTO, need to re-randomize
+        if (_src.spraying()) { // switch path on every packet
+            move_path_flow_label();
+        }
+        if (_src.adaptive()) {
+            _pathid = _uec_mp->nextEntropy(_last_acked+1, 0); // current_cwnd is unused
+            while (_ev_timers.find(_pathid) != _ev_timers.end() && eventlist().now() - _ev_timers[_pathid] > _rto) {
+                _uec_mp->processEv(_pathid, UecMultipath::PATH_TIMEOUT);
+                _ev_timers.erase(_pathid);
+                _pathid = _uec_mp->nextEntropy(_last_acked+1, 0);
+            }
+        } // todo: should also add this for PLB to make it work with failures
 
         retransmit_packet();
     }
@@ -966,13 +976,13 @@ ConstantCcaSink::receivePacket(Packet& pkt) {
     ConstantCcaPacket::seq_t dsn = p->dsn();
     int size = p->size(); // TODO: the following code assumes all packets are the same size
     //cout << "ConstantCcaSink received dsn " << dsn << endl;
-    if (dsn == _cumulative_data_ack+1) {
-        _cumulative_data_ack = dsn + size - 1;
-        while (!_dsn_received.empty() && (*(_dsn_received.begin()) == _cumulative_data_ack+1) ) {
+    if (dsn == _cumulative_data_ack + 1) {
+        _cumulative_data_ack = _cumulative_data_ack + size;
+        while (!_dsn_received.empty() && (*(_dsn_received.begin()) == _cumulative_data_ack + 1) ) {
             _dsn_received.erase(_dsn_received.begin());
             _cumulative_data_ack+= size;
         }
-    } else if (dsn < _cumulative_data_ack+1) {
+    } else if (dsn < _cumulative_data_ack + 1) {
         // cout << "Dup DSN received!\n";
     } else {
         // hole in sequence space
@@ -1054,16 +1064,16 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
     simtime_picosec ts = p->ts();
     _packets+= p->size();
     uint32_t seqno = p->seqno();
-    if (seqno == _cumulative_ack+1) { // it's the next expected seq no
-        _cumulative_ack = seqno + size - 1;
+    if (seqno == _cumulative_ack + 1) { // it's the next expected seq no
+        _cumulative_ack = _cumulative_ack + size;
         _bitmap = _bitmap << 1;
         // are there any additional received packets we can now ack?
-        while (!_received.empty() && (*(_received.begin()) == _cumulative_ack+1) ) {
+        while (!_received.empty() && (*(_received.begin()) == _cumulative_ack + 1) ) {
             _received.erase(_received.begin());
             _cumulative_ack += size;
             _bitmap = _bitmap << 1;
         }
-    } else if (seqno < _cumulative_ack+1) {
+    } else if (seqno < _cumulative_ack + 1) {
         // it is before the next expected sequence - must be a spurious retransmit.
         // We want to see if this happens - it generally shouldn't
         // cout << "Spurious retransmit received!\n";
@@ -1071,7 +1081,7 @@ ConstantCcaSubflowSink::receivePacket(Packet& pkt) {
     } else {
         // it's not the next expected sequence number
         _received.insert(seqno);
-        int shift = (seqno - _cumulative_ack + 1) / size;
+        int shift = (seqno - (_cumulative_ack + 1)) / size;
         uint64_t shifted = ((uint64_t)1 << 63) >> shift;
         _bitmap = _bitmap | shifted;
 
