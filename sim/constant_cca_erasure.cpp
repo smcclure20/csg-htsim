@@ -142,7 +142,7 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _spraying = false;
 
     _timer_start = timeInf;
-    _min_rto = timeFromUs((uint32_t)10);
+    _min_rto = timeFromUs((uint32_t)2);
     _rtt = 0;
     _rto = timeFromMs(1);
     _mdev = 0;
@@ -165,8 +165,7 @@ ConstantErasureCcaSrc::send_packets() {
             // _lost_offset = _current_seqno - _approx_lost;
             return 0;
         }
-        //if ()
-        if (!_assume_lossless && _final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
+         if (!_assume_lossless && _final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
             if (_pacer.allow_send()) {
                 bool sent = send_next_packet();
                 if (sent) {
@@ -304,7 +303,7 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     p->free();
 
     _inflight = _current_seqno - _highest_ack; // This is an approximation (may be more due to reordering)
-    _approx_lost = (seqno - 1 + mss()) - _bytes_acked;
+    _approx_lost = (_highest_ack - 1) - _bytes_acked;
     // If have sent everything, need to check that the num lost is not increasing
 
     _timer_start = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
@@ -551,7 +550,7 @@ ConstantErasureCcaSink::receivePacket(Packet& pkt) {
 
     // if (_bytes_received >= _src->flow_size()) {
         ConstantCcaAck* newAck = ConstantCcaAck::newpkt(p->flow(), *_route, 
-                                    0, seqno + 1, _bytes_received,
+                                    0, seqno + p->size() + 1, _bytes_received,
                                     p->ts(), p->src(), p->dst(), p->pathid());
 
         newAck->sendOn();
