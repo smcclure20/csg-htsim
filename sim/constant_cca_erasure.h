@@ -113,7 +113,7 @@ public:
     uint64_t _packets_sent;
     uint64_t _current_seqno;
     uint64_t _approx_lost;
-    bool _assume_lossless;
+    bool _assume_lossless = false;
     void set_assume_lossless(bool assume_lossless) {_assume_lossless = assume_lossless;}
 
     // stats
