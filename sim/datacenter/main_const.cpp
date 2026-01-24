@@ -340,18 +340,6 @@ int main(int argc, char **argv) {
     no_of_nodes = top->no_of_nodes();
     cout << "actual nodes " << no_of_nodes << endl;
 
-    vector<const Route*>*** net_paths;
-    net_paths = new vector<const Route*>**[no_of_nodes];
-
-    int* is_dest = new int[no_of_nodes];
-    
-    for (uint32_t i=0; i<no_of_nodes; i++){
-        is_dest[i] = 0;
-        net_paths[i] = new vector<const Route*>*[no_of_nodes];
-        for (uint32_t j = 0; j<no_of_nodes; j++)
-            net_paths[i][j] = NULL;
-    }
-
     // Permutation connections
     ConnectionMatrix* conns = new ConnectionMatrix(no_of_nodes);
 
@@ -394,17 +382,6 @@ int main(int argc, char **argv) {
         }
         
         connID++;
-        if (!net_paths[src][dest]) {
-            vector<const Route*>* paths = top->get_paths(src,dest);
-            net_paths[src][dest] = paths;
-            for (uint32_t p = 0; p < paths->size(); p++) {
-                routes.push_back((*paths)[p]);
-            }
-        }
-        if (!net_paths[dest][src]) {
-            vector<const Route*>* paths = top->get_paths(dest,src);
-            net_paths[dest][src] = paths;
-        }
         // TODO: set the number of subflows here (if -subflows == 0) such that the rate  is low enough for a certain dupack threshold
         if (no_of_subflows == 0) {
             int num_queues = 4;
@@ -467,77 +444,10 @@ int main(int argc, char **argv) {
             routeout = top->get_tor_route(src);
             routein = top->get_tor_route(dest);
         } else {
-            uint32_t choice = 0;
-          
-#ifdef FAT_TREE
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef OV_FAT_TREE
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef MH_FAT_TREE
-            int use_all = it_sub==net_paths[src][dest]->size();
-
-            if (use_all)
-                choice = inter;
-            else
-                choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef VL2
-            choice = rand()%net_paths[src][dest]->size();
-#endif
-          
-#ifdef STAR
-            choice = 0;
-#endif
-          
-#ifdef BCUBE
-            //choice = inter;
-            
-            int min = -1, max = -1,minDist = 1000,maxDist = 0;
-            if (subflow_count==1){
-                //find shortest and longest path 
-                for (uint32_t dd=0;dd<net_paths[src][dest]->size();dd++){
-                    if (net_paths[src][dest]->at(dd)->size()<minDist){
-                        minDist = net_paths[src][dest]->at(dd)->size();
-                        min = dd;
-                    }
-                    if (net_paths[src][dest]->at(dd)->size()>maxDist){
-                        maxDist = net_paths[src][dest]->at(dd)->size();
-                        max = dd;
-                    }
-                }
-                choice = min;
-            } 
-            else
-                choice = rand()%net_paths[src][dest]->size();
-#endif
-            if (choice>=net_paths[src][dest]->size()){
-                printf("Weird path choice %d out of %lu\n",choice,net_paths[src][dest]->size());
-                exit(1);
-            }
-          
-#if PRINT_PATHS
-            for (uint32_t ll=0;ll<net_paths[src][dest]->size();ll++){
-                paths << "Route from "<< ntoa(src) << " to " << ntoa(dest) << "  (" << ll << ") -> " ;
-                print_path(paths,net_paths[src][dest]->at(ll));
-            }
-#endif
-          
-            routeout = new Route(*(net_paths[src][dest]->at(choice)));
-            //routeout->push_back(swiftSnk);
-            
-            routein = new Route(*top->get_paths(dest,src)->at(choice));
-            //routein->push_back(swiftSrc);
+            printf("Source routing not currently supported");
+            exit(1);
         }
 
-        // simtime_picosec offset = (interpacket_delay/connCount) * (connID-1);
-        // simtime_picosec offset = (interpacket_delay/connCount) * (rand()%(connCount-1));
-        // simtime_picosec starttime = crt->start + offset;
-        // sender->set_paths(net_paths[src][dest]);
         sender->connect(*sink, (uint32_t)crt->start + rand()%(interpacket_delay), no_of_subflows, dest, *routeout, *routein);
         sender->set_cwnd(cwnd*Packet::data_packet_size());
         // sender->set_paths(net_paths[src][dest]);
@@ -583,45 +493,6 @@ int main(int argc, char **argv) {
 
     cout << "Done" << endl;
 
-#if PRINT_PATHS
-    list <const Route*>::iterator rt_i;
-    int counts[10]; int hop;
-    for (rt_i = routes.begin(); rt_i != routes.end(); rt_i++) {
-        const Route* r = (*rt_i);
-        //print_route(*r);
-        cout << "Path:" << endl;
-        for (uint32_t i = 0; i < r->size(); i++) {
-            PacketSink *ps = r->at(i); 
-            CompositeQueue *q = dynamic_cast<CompositeQueue*>(ps);
-            if (q == 0) {
-                cout << ps->nodename() << endl;
-            } else {
-                cout << q->nodename() << " id=" << q->get_id() << " " << q->num_packets() << "pkts " 
-                     << q->num_headers() << "hdrs " << q->num_acks() << "acks " << q->num_nacks() << "nacks " << q->num_stripped() << "stripped"
-                     << endl;
-            }
-        } 
-        cout << endl;
-    }
-    for (uint32_t ix = 0; ix < 10; ix++)
-        counts[ix] = 0;
-    for (rt_i = routes.begin(); rt_i != routes.end(); rt_i++) {
-        const Route* r = (*rt_i);
-        //print_route(*r);
-        hop = 0;
-        for (uint32_t i = 0; i < r->size(); i++) {
-            PacketSink *ps = r->at(i); 
-            CompositeQueue *q = dynamic_cast<CompositeQueue*>(ps);
-            if (q == 0) {
-            } else {
-                counts[hop] += q->num_stripped();
-                q->_num_stripped = 0;
-                hop++;
-            }
-        } 
-        cout << endl;
-    }
-#endif    
 
     /*for (uint32_t i = 0; i < 10; i++)
         cout << "Hop " << i << " Count " << counts[i] << endl; */
