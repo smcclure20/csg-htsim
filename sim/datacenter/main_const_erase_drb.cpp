@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
             }else if (!strcmp(argv[i+1], "queue")) {
                 failure_type = BLACK_HOLE_QUEUE;
             } else {
-                exit_error(argv[0]);
+                exit_error(argv[i]);
             }
             i++;
         } else if (!strcmp(argv[i],"-ftime")){
@@ -210,8 +210,10 @@ int main(int argc, char **argv) {
                 host_lb = PLB;
             } else if (!strcmp(argv[i+1], "sprayad")) {
                 host_lb = SPRAY_ADAPTIVE;
-            } else {
-                exit_error(argv[0]);
+            } else if (!strcmp(argv[i+1], "drb")) {
+                host_lb = DRB;
+            }  else {
+                exit_error(argv[i]);
             }
             i++;
         } else if (!strcmp(argv[i],"-strat")){
@@ -234,16 +236,14 @@ int main(int argc, char **argv) {
             } else if (!strcmp(argv[i+1], "rr_ecmp")) {
                 FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::RR_ECMP);
                 route_strategy = RR_ECMP;
-            } else if (!strcmp(argv[i+1], "drb")) {
-                host_lb = DRB;
-            }  else if (!strcmp(argv[i+1], "llss")) {
+            } else if (!strcmp(argv[i+1], "llss")) {
                 FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::PER_POD_IWRR); 
                 route_strategy = ECMP; // Use ECMP enum for main logic as it's just a switch strategy
             }  else if (!strcmp(argv[i+1], "fib_llss")) {
                 FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::FIB_LLSS);
                 route_strategy = ECMP;
             } else {
-                exit_error(argv[0]);
+                exit_error(argv[i]);
             }
             i++;
         } else {
