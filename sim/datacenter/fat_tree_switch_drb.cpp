@@ -64,17 +64,28 @@ void FatTreeSwitchDRB::receivePacket(Packet& pkt){
         
         return;
     }
-
     if (_packets.find(&pkt)==_packets.end()){
         //ingress pipeline processing.
 
+
         _packets[&pkt] = true;
+
+        // Check if the packet has a full source route that we should follow (e.g. from DRB).
+        // We identify this by the route length. A hop-by-hop route has size 3.
+        if (pkt.route() && pkt.route()->size() > 4 && pkt.nexthop() < pkt.route()->size() && _strategy != ADAPTIVE_ROUTING) {
+            
+            _pipe->receivePacket(pkt);
+            return;
+        }
 
         const Route * nh = getNextHop(pkt,NULL);
         if (nh == NULL) {
-            _packets.erase(&pkt);
-            pkt.free(); // this is a black hole; drop the packet
-            return;
+            
+            uint32_t simplified_flow_num = pkt.flow_id();
+            if (simplified_flow_num > 1000000000) {
+                simplified_flow_num -= 1000000000;
+            }
+            exit(1);
         }
         //set next hop which is peer switch.
         pkt.set_route(*nh);
@@ -84,7 +95,7 @@ void FatTreeSwitchDRB::receivePacket(Packet& pkt){
     }
     else {
         _packets.erase(&pkt);
-        
+
         //egress queue processing.
         //cout << "Switch type " << _type <<  " id " << _id << " pkt dst " << pkt.dst() << " dir " << pkt.get_direction() << endl;
         pkt.sendOn();
