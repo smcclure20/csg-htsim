@@ -131,6 +131,7 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _app_limited = -1;
     _completion_time = 0;
     _inflight = 0;
+    _approx_lost = 0;
     _highest_ack = 0;
     _final_bdp_time = 0;
 
@@ -157,12 +158,14 @@ ConstantErasureCcaSrc::send_packets() {
             _completion_time = eventlist().now();
         }
         return 0;
-    } else if (_inflight + _bytes_acked >= _flow_size) { // final bdp
+    } else if (_current_seqno - _approx_lost >= _flow_size) { // final bdp (inflight+bytes_acked) (_current_seqno - _approx_lost >= _flow_size) 
         if (_final_bdp_time == 0) {
             _final_bdp_time = eventlist().now();
+            // _lost_offset = _current_seqno - _approx_lost;
             return 0;
         }
-        if (_final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rto) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
+        //if ()
+        if (_final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
             if (_pacer.allow_send()) {
                 bool sent = send_next_packet();
                 if (sent) {
@@ -291,7 +294,8 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     simtime_picosec rtt = eventlist().now() - ts_echo;
     update_rtt(rtt);
     uint32_t pathid = p->pathid();
-    _bytes_acked = p->ds_ackno();
+    // _bytes_acked = p->ds_ackno();
+    _bytes_acked = max(p->ds_ackno(), _bytes_acked); //if acks get reordered, this might not always be the highest
     ConstantCcaPacket::seq_t seqno = p->ackno(); // echoes the sequence number this is an ack for 
     _highest_ack = max((uint64_t)seqno, _highest_ack);
     _total_packets++;
@@ -299,6 +303,8 @@ ConstantErasureCcaSrc::receivePacket(Packet& pkt)
     p->free();
 
     _inflight = _current_seqno - _highest_ack; // This is an approximation (may be more due to reordering)
+    _approx_lost = seqno - _bytes_acked;
+    // If have sent everything, need to check that the num lost is not increasing
 
     _timer_start = timeInf; // reset timer on receiving an ACK TODO: change to only update if ACK number has increased? not sure if that makes sense in this setup
     // Potential change: per-EV timers
