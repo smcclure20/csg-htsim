@@ -112,6 +112,7 @@ public:
     int32_t _app_limited;
     uint64_t _packets_sent;
     uint64_t _current_seqno;
+    uint64_t _approx_lost;
 
     // stats
     simtime_picosec _completion_time;
