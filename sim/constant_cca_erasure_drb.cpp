@@ -251,13 +251,6 @@ ConstantErasureCcaSrcDRB::send_packets() {
             // _lost_offset = _current_seqno - _approx_lost;
             return 0;
         }
-        //if ()
-        // std::cout << "Assumes lossless " << _assume_lossless << std::endl;
-        // std::cout << "Final BDP time " << _final_bdp_time << std::endl;
-        // std::cout << "Now " << eventlist().now() << std::endl;
-        // std::cout << "Diff  " << eventlist().now() - _final_bdp_time << std::endl;
-        // std::cout << "RTO " << _rto << std::endl;
-        // std::cout << "RTT " << _rtt << std::endl;
          if (!_assume_lossless && _final_bdp_time != 0 && eventlist().now() - _final_bdp_time > _rtt) { // timeout on final bdp. send again (will not stop again until final ack received - TODO make it wait again)
             // std::cout << "Allow send  " << _pacer.allow_send() << std::endl;
             if (_pacer.allow_send()) {
@@ -568,25 +561,6 @@ ConstantErasureCcaSrcDRB::move_path_flow_label() {
 }
 
 void
-ConstantErasureCcaSrcDRB::move_path(bool permit_cycles) {
-    cout << timeAsUs(eventlist().now()) << " " << nodename() << " td move_path\n";
-    if (_paths.size() == 0) {
-        cout << nodename() << " cant move_path\n";
-        return;
-    }
-    _path_index++;
-    if (!permit_cycles) {
-        // if we've moved paths so often we've run out of paths, I want to know
-        assert(_path_index < _paths.size()); 
-    } else if (_path_index >= _paths.size()) {
-        _path_index = _path_index % _paths.size();
-    }
-    Route* new_route = _paths[_path_index]->clone();
-    new_route->push_back(_sink);
-    _route = new_route;
-}
-
-void
 ConstantErasureCcaSrcDRB::reroute(const Route &routeout) {
     Route* new_route = routeout.clone();
     new_route->push_back(_sink);
@@ -613,38 +587,6 @@ ConstantErasureCcaSrcDRB::check_stoptime() {
 void ConstantErasureCcaSrcDRB::set_app_limit(int pktps) {
     _app_limited = pktps;
     send_packets();
-}
-
-void
-ConstantErasureCcaSrcDRB::set_paths(vector<const Route*>* rt_list){
-    size_t no_of_paths = rt_list->size();
-    _paths.resize(no_of_paths);
-    for (size_t i=0; i < no_of_paths; i++){
-        Route* rt_tmp = new Route(*(rt_list->at(i)));
-        if (!_scheduler) {
-            _scheduler = dynamic_cast<ConstBaseScheduler*>(rt_tmp->at(0));
-            assert(_scheduler);
-        } else {
-            // sanity check all paths share the same scheduler.  If we ever want to use multiple NICs, this will need fixing
-            assert(_scheduler == dynamic_cast<ConstBaseScheduler*>(rt_tmp->at(0)));
-        }
-        rt_tmp->set_path_id(i, rt_list->size());
-        _paths[i] = rt_tmp;
-    }
-    permute_paths();
-    _path_index = 0;
-}
-
-void
-ConstantErasureCcaSrcDRB::permute_paths() {
-    // Fisher-Yates shuffle
-    size_t len = _paths.size();
-    for (size_t i = 0; i < len; i++) {
-        size_t ix = random() % (len - i);
-        const Route* tmppath = _paths[ix];
-        _paths[ix] = _paths[len-1-i];
-        _paths[len-1-i] = tmppath;
-    }
 }
 
 void 
@@ -690,7 +632,6 @@ ConstantErasureCcaSinkDRB::receivePacket(Packet& pkt) {
     uint32_t ack_ptr_value = 0;
 
     if (_src->_drb) {
-        uint32_t flow_destination = _src->_destination;
 
         if (_src->_drb_state_initialized) {
             ConstantErasureCcaSrcDRB::DrbPointers& drb_ptr = _src->_drb_state;
@@ -714,16 +655,17 @@ ConstantErasureCcaSinkDRB::receivePacket(Packet& pkt) {
                 delete drb_route;
             }
             ack_route = _src->_drb_ack_routes[ack_ptr_value];
-
+            
             // Increment ACK packet count for this destination
             drb_ptr.ack_count++;
         }
     }
 
     // if (_bytes_received >= _src->flow_size()) {
-        ConstantCcaAck* newAck = ConstantCcaAck::newpkt(p->flow(), *_route, 
+        ConstantCcaAck* newAck = ConstantCcaAck::newpkt(p->flow(), *ack_route, 
                                     0, seqno + p->size() + 1, _bytes_received,
                                     p->ts(), p->src(), p->dst(), p->pathid());
+        newAck->set_direction(NONE);
 
         newAck->sendOn();
     // }

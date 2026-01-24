@@ -100,8 +100,6 @@ public:
 
     // add paths for PLB
     void enable_plb() {_plb = true;}
-    void set_paths(vector<const Route*>* rt);
-    void permute_paths();
     bool _plb;
     inline bool plb() const {return _plb;}
     void set_plb_threshold_ecn(int threshold) { _plb_threshold_ecn = threshold; }
@@ -144,9 +142,6 @@ public:
 
     uint16_t _mss;
     inline uint16_t mss() const {return _mss;}
-
-    // paths for PLB or MPSwift
-    vector<const Route*> _paths;
 
     //round trip time estimate
     simtime_picosec _rtt, _rto, _min_rto, _mdev;
