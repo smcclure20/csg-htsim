@@ -2,8 +2,8 @@
 #ifndef _FATTREESWITCH_H
 #define _FATTREESWITCH_H
 
-#include "switch.h"
-#include "callback_pipe.h"
+#include "../switch.h"
+#include "../callback_pipe.h"
 #include <unordered_map>
 
 class FatTreeTopology;

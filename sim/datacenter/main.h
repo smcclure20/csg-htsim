@@ -3,7 +3,7 @@
 #define MAIN_H
 
 #include <string>
-#include "network.h"
+#include "../network.h"
 
 
 #define HOST_NIC 100000 // host nic speed in Mbps
