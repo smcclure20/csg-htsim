@@ -138,6 +138,8 @@ public:
     int countActiveUpPorts();
     int countActiveRoutesToPod(int pod);
     void forcePopulateRoutes();
+    void forcePopulateLlssSchedules();
+    void clearLlssState();
     bool addRoute(uint32_t dst);
     void setWeights(map<string,int> weights) {_switch_weights=weights;}
     void setFibWeighted(bool weighted) {_fib->setWeighted(weighted);}
@@ -173,6 +175,7 @@ private:
     std::vector<BaseQueue*> _generate_llss_schedule(const std::map<BaseQueue*, int>& weights, bool exp_mode);
     std::map<BaseQueue*, int> _get_llss_leaf_weights(uint32_t dest_pod_id);
     std::map<BaseQueue*, int> _get_llss_spine_weights(uint32_t dest_pod_id);
+    std::vector<BaseQueue*> _generate_weighted_llss_schedule(uint32_t dest_pod_id);
     bool _is_path_valid(uint32_t dst, BaseQueue* port);
 
     static int _gcd(int a, int b) {

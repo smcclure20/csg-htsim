@@ -152,6 +152,7 @@ public:
     void restore_failed_link(uint32_t type, uint32_t switch_id, uint32_t link_id);
     void reset_routes(uint32_t switch_id);
     void reset_weights();
+    void reset_llss_state();
     void update_routes(uint32_t switch_id);
     void update_weights(uint32_t switch_id, map<string,int> link_weights); // assumes only TORs for now
     void update_weights_tor_podfailed(int failed_pod);

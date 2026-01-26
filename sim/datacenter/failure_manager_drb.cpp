@@ -4,6 +4,8 @@
 #include "fat_tree_switch_drb.h"
 #include <assert.h>
 
+extern void set_enable_bgp(bool b);
+
 FailureManager::FailureManager(FatTreeTopologyDRB* ft, EventList& eventlist, simtime_picosec fail_time, simtime_picosec route_time, simtime_picosec weight_time, FailType failure_type) 
 : EventSource(eventlist, "failure_manager") {
     _ft = ft;
@@ -32,7 +34,7 @@ void FailureManager::doNextEvent() {
     if (!_link_failed && _eventlist.now() >= _fail_time) {
         std::cout << "Failing link " << _switch_type << " " << _switch_id << ": link " << _link_number <<  " at time " << _eventlist.now() << std::endl;
         if (_fail_time == 0) { // TODO: This should be for any fail time before when the first packet could get to a node with a failure
-            _ft->populate_all_routes();
+            _ft->populate_all_routes(); // also populates LLSS schedules
             std::cout << "Populating routes before the failure so that they are not accurate after" << std::endl;
         }
         _ft->add_failed_link(_switch_type, _switch_id, _link_number, _failure_type);
@@ -58,6 +60,8 @@ void FailureManager::doNextEvent() {
         if (!_routes_updated && _eventlist.now() >= _route_update_time) {
             std::cout << "Updating routes " << _eventlist.now() << std::endl;
             _ft->precompute_drb_paths(); // update drb paths
+            // set_enable_bgp(true);
+            _ft->reset_llss_state();
             _ft->update_routes(_switch_id);
             _routes_updated = true;
             uint32_t podpos = _switch_id % _ft->agg_switches_per_pod();

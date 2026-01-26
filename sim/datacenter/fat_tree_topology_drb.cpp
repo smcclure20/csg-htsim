@@ -1295,6 +1295,7 @@ void FatTreeTopologyDRB::add_failed_link(uint32_t type, uint32_t switch_id, uint
 
     // note: if bundlesize > 1, we only fail the first link in a bundle.
     std::cout << "Failing the link between agg switch " << switch_id << " and core switch " <<  k << std::endl;
+    failed_links++;
     
     assert(queues_nup_nc[switch_id][k][0]!=NULL && queues_nc_nup[k][switch_id][0]!=NULL );
     if (failure_type == BLACK_HOLE_DROP) {
@@ -1331,7 +1332,19 @@ void FatTreeTopologyDRB::reset_routes(uint32_t switch_id) {
     // Get the appropriate switch and clear its FIB
     Switch* switch_up = switches_up[switch_id];
     switch_up->resetFib(); //clears all current routes to be repopulated
-    // Let the swtich re-populate its FIB as traffic arrives (will check if links are down)  
+    // Let the swtich re-populate its FIB as traffic arrives (will check if links are down) 
+}
+
+void FatTreeTopologyDRB::reset_llss_state() {
+    // Reset LLSS state for all switches (cores do not do LLSS)
+    for (Switch* s : switches_lp) {
+        FatTreeSwitchDRB* ft = (FatTreeSwitchDRB*) s;
+        ft->clearLlssState();
+    }
+    for (Switch* s : switches_up) {
+        FatTreeSwitchDRB* ft = (FatTreeSwitchDRB*) s;
+        ft->clearLlssState();
+    }
 }
 
 void FatTreeTopologyDRB::reset_weights() {
@@ -1406,13 +1419,16 @@ void FatTreeTopologyDRB::populate_all_routes() {
     for (Switch* s : switches_lp) {
         FatTreeSwitchDRB* ft = (FatTreeSwitchDRB*) s;
         ft->forcePopulateRoutes();
+        ft->forcePopulateLlssSchedules();
     } 
     for (Switch* s : switches_up) {
         FatTreeSwitchDRB* ft = (FatTreeSwitchDRB*) s;
         ft->forcePopulateRoutes();
+        ft->forcePopulateLlssSchedules();
     } for (Switch* s : switches_c) {
         FatTreeSwitchDRB* ft = (FatTreeSwitchDRB*) s;
         ft->forcePopulateRoutes();
+        ft->forcePopulateLlssSchedules();
     }
 }
 

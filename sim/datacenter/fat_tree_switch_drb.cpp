@@ -441,6 +441,30 @@ void FatTreeSwitchDRB::forcePopulateRoutes() {
     }
 }
 
+void FatTreeSwitchDRB::forcePopulateLlssSchedules() {
+    uint32_t pods = _ft->no_of_pods();
+    for (uint32_t i=0; i < pods; i++) {
+        _generate_weighted_llss_schedule(i);
+    }
+}
+
+void FatTreeSwitchDRB::clearLlssState() {
+    uint32_t num_pods = _ft->no_of_pods();
+    uint32_t num_tors = num_pods * _ft->tor_switches_per_pod();
+    _llss_schedules.clear();
+    _llss_schedules.resize(num_pods);
+    _path_validity_cache.clear();
+    _path_validity_cache.resize(num_tors);
+    _llss_pointers.clear();
+    if (_type == TOR) {
+        _llss_pointers.resize(num_tors * 2, UINT32_MAX);
+    } else {
+        _llss_pointers.resize(num_pods * 2, UINT32_MAX);
+    }
+    // _cached_weights = ; // Unused it seems??
+
+}
+
 void FatTreeSwitchDRB::applyWeights() {
     // For all existing routes, add according to weight. For future ones, the _switch_weights and _weighted should indicate that you have to add to the weighted fib too
     _fib->setWeighted(true);
@@ -677,6 +701,17 @@ std::map<BaseQueue*, int> FatTreeSwitchDRB::_get_llss_spine_weights(uint32_t des
     return weights;
 }
 
+std::vector<BaseQueue*> FatTreeSwitchDRB::_generate_weighted_llss_schedule(uint32_t dest_pod_id) {
+    std::map<BaseQueue*, int> weights;
+    if (_type == TOR) {
+        weights = _get_llss_leaf_weights(dest_pod_id);
+    } else {
+        weights = _get_llss_spine_weights(dest_pod_id);
+    }
+    bool exp_mode = (_strategy == PER_POD_IWRR_EXP || _strategy == PER_POD_IWRR_DET || _strategy == PER_POD_IWRR_A_RR);
+    return _generate_llss_schedule(weights, exp_mode);
+}
+
 FatTreeSwitchDRB::routing_strategy FatTreeSwitchDRB::_strategy = FatTreeSwitchDRB::NIX;
 uint16_t FatTreeSwitchDRB::_ar_fraction = 0;
 uint16_t FatTreeSwitchDRB::_ar_sticky = FatTreeSwitchDRB::PER_PACKET;
@@ -794,14 +829,7 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                         std::vector<BaseQueue*>* schedule = &_llss_schedules[dest_pod];
                         
                         if (schedule->empty()) {
-                            std::map<BaseQueue*, int> weights;
-                            if (_type == TOR) {
-                                weights = _get_llss_leaf_weights(dest_pod);
-                            } else {
-                                weights = _get_llss_spine_weights(dest_pod);
-                            }
-                            bool exp_mode = (_strategy == PER_POD_IWRR_EXP || _strategy == PER_POD_IWRR_DET || _strategy == PER_POD_IWRR_A_RR);
-                            *schedule = _generate_llss_schedule(weights, exp_mode);
+                            *schedule = _generate_weighted_llss_schedule(dest_pod);
                         }
 
                         if (schedule->empty()) {
