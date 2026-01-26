@@ -22,7 +22,15 @@ FatTreeSwitch::FatTreeSwitch(EventList& eventlist, string s, switch_type t, uint
     // if (ft->weighted()) {
     //     _fib->initialize_weighted_table();
     // }
+    _rng.seed(_hash_salt); // Use the salt derived from global seed
     _switch_weights = map<string,int> {};
+    uint32_t num_pods = _ft->no_of_pods();
+    uint32_t num_tors = num_pods * _ft->tor_switches_per_pod();
+    if (_type == TOR) {
+        _llss_pointers.resize(num_tors * 2, UINT32_MAX);
+    } else {
+        _llss_pointers.resize(num_pods * 2, UINT32_MAX);
+    }
 }
 
 void FatTreeSwitch::receivePacket(Packet& pkt){
@@ -500,6 +508,25 @@ Route* FatTreeSwitch::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 else ecmp_choice = freeBSDHash(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 
                 break;
+            case FIB_LLSS:
+                // Use LLSS-style Round Robin on valid ports (available_hops)
+                uint32_t dest_id;
+                if (_type == TOR) {
+                    dest_id = _ft->HOST_POD_SWITCH(pkt.dst());
+                } else {
+                    dest_id = _ft->HOST_POD(pkt.dst());
+                }
+                bool is_ack = (pkt.type() == CONSTCCAACK || pkt.type() == SWIFTACK);
+                uint32_t ptr_idx = dest_id * 2 + (is_ack ? 1 : 0);
+                if (_llss_pointers[ptr_idx] == UINT32_MAX) {
+                    uint32_t val = _rng();
+                    // cout << "pointer " << ptr_idx << " set to " << val << std::endl;
+                    _llss_pointers[ptr_idx] = val; // Initialize randomly
+                }
+                ecmp_choice = _llss_pointers[ptr_idx] % available_hops->size();
+                _llss_pointers[ptr_idx]++;
+                break;
+             
             }
         // std::cout << "Destination " << pkt.dst() << " choice " << ecmp_choice << " options " << available_hops->size() << std::endl;
         FibEntry* e = (*available_hops)[ecmp_choice];

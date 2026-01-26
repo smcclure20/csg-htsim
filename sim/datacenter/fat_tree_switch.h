@@ -88,7 +88,7 @@ public:
     };
 
     enum routing_strategy {
-        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5
+        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5, FIB_LLSS = 6
     };
 
     enum sticky_choices {
@@ -164,6 +164,9 @@ private:
     unordered_map<Packet*,bool> _packets;
 
     map<string,int> _switch_weights;
+    
+    std::vector<uint32_t> _llss_pointers;
+    std::mt19937 _rng;
 };
 
 #endif
