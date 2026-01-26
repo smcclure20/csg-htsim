@@ -228,6 +228,9 @@ int main(int argc, char **argv) {
             } else if (!strcmp(argv[i+1], "rr_ecmp")) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::RR_ECMP);
                 route_strategy = RR_ECMP;
+            }  else if (!strcmp(argv[i+1], "fib_llss")) {
+                FatTreeSwitch::set_strategy(FatTreeSwitch::FIB_LLSS);
+                route_strategy = ECMP;
             } else {
                 exit_error(argv[0]);
             }
@@ -440,6 +443,12 @@ int main(int argc, char **argv) {
 
     cout << "Done" << endl; 
 
+    // uint32_t ackDrops = top->get_ack_drops();
+    // cout << "Total ACK drops: " << ackDrops << endl;
+    // uint32_t dataDrops = top->get_data_drops();
+    // cout << "Total Data drops: " << dataDrops << endl;
+    // flowlog << ackDrops << "," << dataDrops << endl;
+
     /*for (uint32_t i = 0; i < 10; i++)
         cout << "Hop " << i << " Count " << counts[i] << endl; */
     list <ConstantErasureCcaSrc*>::iterator src_i;
@@ -457,8 +466,10 @@ int main(int argc, char **argv) {
             flowlog << "Flow ID,Completion Time,ReceivedBytes,PacketsSent" << endl;
         for (src_i = srcs.begin(); src_i != srcs.end(); src_i++) {
             ConstantErasureCcaSink* sink = (*src_i)->_sink;
+            // bool is_p1 = (((*src_i)->_addr < 16) && ((*src_i)->_destination > 16)) || (((*src_i)->_addr > 16) && ((*src_i)->_destination < 16));
             simtime_picosec time = (*src_i)->_completion_time > 0 ? (*src_i)->_completion_time - (*src_i)->_start_time: 0;
-            flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << "," << (*src_i)->_packets_sent <<  endl;
+            flowlog << (*src_i)->_addr << "->" << (*src_i)->_destination << "," << time << "," << sink->cumulative_ack() << ","
+             << (*src_i)->_packets_sent << endl;
         }
     }
 
