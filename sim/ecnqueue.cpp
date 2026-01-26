@@ -97,7 +97,17 @@ ECNQueue::completeService()
 
     bool lost = checkBurstyLoss() || _drop_all;
     if (lost) {
+        // if (pkt->type() == CONSTCCAACK) {
+        //     _ack_drops ++;
+        // } else {
+        //     _data_drops++;
+        // }
         pkt->free();
+        // if (pkt->type() == CONSTCCAACK) {
+        //     _ack_drops ++;
+        // } else {
+        //     _data_drops++;
+        // }
     }
     else {
         /* tell the packet to move on to the next pipe */

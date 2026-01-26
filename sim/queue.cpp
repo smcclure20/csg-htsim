@@ -18,6 +18,8 @@ BaseQueue::BaseQueue(linkspeed_bps bitrate, EventList& eventlist, QueueLogger* l
     _last_update_utilization = 0;
     _last_qs = 0;
     _last_utilization = 0;
+    _ack_drops = 0;
+    _data_drops = 0;
 }
 
 void 

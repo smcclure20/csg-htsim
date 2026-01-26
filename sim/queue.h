@@ -121,6 +121,8 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
 
     bool getFailed() {return _failed;}
 
+    uint32_t getAckDrops() {return _ack_drops;}
+    uint32_t getDataDrops() {return _data_drops;}
 
 protected:
     // Housekeeping
@@ -155,6 +157,9 @@ protected:
     simtime_picosec _burst_end = 0;
     bool _drop_all = false; // used for when BW is 0%
     bool _failed = false;
+
+    uint32_t _ack_drops = 0;
+    uint32_t _data_drops = 0;
 };
 
 
