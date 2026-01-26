@@ -88,7 +88,7 @@ public:
     };
 
     enum routing_strategy {
-        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5, PER_POD_IWRR = 6, PER_POD_IWRR_EXP = 7, PER_POD_IWRR_DET = 8, PER_POD_IWRR_A_RR = 9, PER_POD_IWRR_A_RAND = 10, CUMUL = 13, W_ECMP = 14, FIB_LLSS = 15
+        NIX = 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5, PER_POD_IWRR = 6, PER_POD_IWRR_EXP = 7, PER_POD_IWRR_DET = 8, PER_POD_IWRR_A_RR = 9, PER_POD_IWRR_A_RAND = 10, CUMUL = 13, W_ECMP = 14, FIB_LLSS = 15, PER_POD_IWRR_PERMUTE = 16, FIB_LLSS_PERMUTE
     };
 
     enum sticky_choices {
@@ -170,12 +170,14 @@ private:
     // LLSS State
     std::vector<std::vector<BaseQueue*>> _llss_schedules;
     std::vector<uint32_t> _llss_pointers;
+    std::vector<uint32_t> _llss_pointer_wraparounds;
     std::vector<std::map<BaseQueue*, int>> _cached_weights;
     std::mt19937 _rng;
     std::vector<BaseQueue*> _generate_llss_schedule(const std::map<BaseQueue*, int>& weights, bool exp_mode);
     std::map<BaseQueue*, int> _get_llss_leaf_weights(uint32_t dest_pod_id);
     std::map<BaseQueue*, int> _get_llss_spine_weights(uint32_t dest_pod_id);
     std::vector<BaseQueue*> _generate_weighted_llss_schedule(uint32_t dest_pod_id);
+    void permute_schedule(vector<BaseQueue *>* schedule);
     bool _is_path_valid(uint32_t dst, BaseQueue* port);
 
     static int _gcd(int a, int b) {

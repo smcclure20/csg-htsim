@@ -41,8 +41,10 @@ FatTreeSwitchDRB::FatTreeSwitchDRB(EventList& eventlist, string s, switch_type t
     _llss_schedules.resize(num_pods);
     if (_type == TOR) {
         _llss_pointers.resize(num_tors * 2, UINT32_MAX);
+        _llss_pointer_wraparounds.resize(num_tors * 2, UINT32_MAX);
     } else {
         _llss_pointers.resize(num_pods * 2, UINT32_MAX);
+        _llss_pointer_wraparounds.resize(num_pods * 2, UINT32_MAX);
     }
     _cached_weights.resize(num_pods);
     // Validity cache depends on destination ToR for both types
@@ -444,7 +446,7 @@ void FatTreeSwitchDRB::forcePopulateRoutes() {
 void FatTreeSwitchDRB::forcePopulateLlssSchedules() {
     uint32_t pods = _ft->no_of_pods();
     for (uint32_t i=0; i < pods; i++) {
-        _generate_weighted_llss_schedule(i);
+        _llss_schedules[i] = _generate_weighted_llss_schedule(i);
     }
 }
 
@@ -456,10 +458,13 @@ void FatTreeSwitchDRB::clearLlssState() {
     _path_validity_cache.clear();
     _path_validity_cache.resize(num_tors);
     _llss_pointers.clear();
+    _llss_pointer_wraparounds.clear();
     if (_type == TOR) {
         _llss_pointers.resize(num_tors * 2, UINT32_MAX);
+        _llss_pointer_wraparounds.resize(num_tors * 2, UINT32_MAX);
     } else {
         _llss_pointers.resize(num_pods * 2, UINT32_MAX);
+         _llss_pointer_wraparounds.resize(num_pods * 2, UINT32_MAX);
     }
     // _cached_weights = ; // Unused it seems??
 
@@ -480,7 +485,8 @@ void FatTreeSwitchDRB::applyWeights() {
 }
 
 bool FatTreeSwitchDRB::_is_path_valid(uint32_t dst, BaseQueue* port) {
-    if (port == NULL || port->getFailed()) return false;
+    // if (port == NULL || port->getFailed()) return false;
+    if (!g_enable_bgp) return true; // If BGP not enabled, only check link status
     
     // Check cache first
     uint32_t dest_tor = _ft->HOST_POD_SWITCH(dst);
@@ -501,8 +507,6 @@ bool FatTreeSwitchDRB::_is_path_valid(uint32_t dst, BaseQueue* port) {
             return (status == 1);
         }
     }
-
-    if (!g_enable_bgp) return true; // If BGP not enabled, only check link status
 
     // BGP-like downstream check
     if (_type == TOR) {
@@ -579,6 +583,16 @@ static int gcd(int a, int b) {
         a = temp;
     }
     return a;
+}
+
+void FatTreeSwitchDRB::permute_schedule(vector<BaseQueue *>* schedule) {
+    int len = schedule->size();
+    for (int i = 0; i < len; i++) {
+        int ix = random() % (len - i);
+        BaseQueue* tmpsched = (*schedule)[ix];
+        (*schedule)[ix] = (*schedule)[len-1-i];
+        (*schedule)[len-1-i] = tmpsched;
+    }
 }
 
 std::vector<BaseQueue*> FatTreeSwitchDRB::_generate_llss_schedule(const std::map<BaseQueue*, int>& weights, bool exp_mode) {
@@ -672,7 +686,6 @@ std::map<BaseQueue*, int> FatTreeSwitchDRB::_get_llss_leaf_weights(uint32_t dest
             
             std::vector<uint32_t> intersection;
             std::set_intersection(s_src.begin(), s_src.end(), s_dest.begin(), s_dest.end(), std::back_inserter(intersection));
-            
             weights[port] = intersection.size();
         }
     }
@@ -794,6 +807,7 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 else ecmp_choice = freeBSDHashDRB(pkt.flow_id(),pkt.pathid(),_hash_salt) % available_hops->size();
                 
                 break;
+            case FIB_LLSS_PERMUTE:
             case FIB_LLSS:
                 if (_ft->has_failures()) {
                     // Use LLSS-style Round Robin on valid ports (available_hops)
@@ -805,8 +819,11 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     }
                     bool is_ack = (pkt.type() == CONSTCCAACK || pkt.type() == SWIFTACK);
                     uint32_t ptr_idx = dest_id * 2 + (is_ack ? 1 : 0);
-                    if (_llss_pointers[ptr_idx] == UINT32_MAX) {
-                        _llss_pointers[ptr_idx] = _rng(); // Initialize randomly
+                    if (_llss_pointers[ptr_idx] == UINT32_MAX || 
+                        (_strategy == FIB_LLSS_PERMUTE && (_llss_pointers[ptr_idx] - _llss_pointer_wraparounds[ptr_idx] > 5 * available_hops->size()))) {
+                        uint32_t val = _rng();
+                        _llss_pointers[ptr_idx] = val;
+                        _llss_pointer_wraparounds[ptr_idx] = val;
                     }
                     ecmp_choice = _llss_pointers[ptr_idx] % available_hops->size();
                     _llss_pointers[ptr_idx]++;
@@ -814,6 +831,7 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                 }
                 // Fall through
             case PER_POD_IWRR:
+            case PER_POD_IWRR_PERMUTE:
                 {
                     // Check for downlink first (host directly connected or in same pod for Agg)
                     // If available_hops has a DOWN route, take it.
@@ -845,52 +863,32 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                             uint32_t m = schedule->size();
                             uint32_t i;
                             
-                            if (_strategy == PER_POD_IWRR_A_RR || _strategy == PER_POD_IWRR_A_RAND) {
-                                // LLSS-A-RR: Pick index with shortest queue among valid paths
-                                uint64_t min_q = UINT64_MAX;
-                                vector<uint32_t> best_indices;
-                                for (uint32_t k = 0; k < m; k++) {
-                                    BaseQueue* q = schedule->at(k);
-                                    if (_is_path_valid(pkt.dst(), q)) {
-                                        uint64_t qs = q->queuesize();
-                                        if (qs < min_q) {
-                                            min_q = qs;
-                                            best_indices.clear();
-                                            best_indices.push_back(k);
-                                        } else if (qs == min_q) {
-                                            best_indices.push_back(k);
-                                        }
-                                    }
-                                }
-                                
-                                if (!best_indices.empty()) {
-                                    i = best_indices[_rng() % best_indices.size()];
-                                } else {
-                                    i = _rng() % m; // Fallback if no valid paths found
-                                }
-                                
-                            } else {
-                                if (_strategy == PER_POD_IWRR_DET) {
-                                    i = (_id + ptr_key_id) % m;
-                                } else {
-                                    i = _rng() % m;
-                                }
-                            }
+                            i = _rng() % m;
                             
                             _llss_pointers[ptr_idx] = i;
+                            _llss_pointer_wraparounds[ptr_idx] = 0;
 
                             // For non-adaptive algorithms, initialize the pair pointer simultaneously with an offset
                             if (_strategy != PER_POD_IWRR_A_RR && _strategy != PER_POD_IWRR_A_RAND) {
                                 uint32_t pair_idx = ptr_key_id * 2 + (is_ack ? 0 : 1);
                                 if (is_ack) {
                                     _llss_pointers[pair_idx] = (i + m/2) % m;
+                                    _llss_pointer_wraparounds[pair_idx] = 0;
                                 } else {
-                                    _llss_pointers[pair_idx] = (i + m - (m/2)) % m;
+                                    _llss_pointers[pair_idx] = (i - (m/2)) % m;
+                                    _llss_pointer_wraparounds[pair_idx] = 0;
                                 }
                             }
                         }
                         
                         uint32_t ptr = _llss_pointers[ptr_idx];
+
+                        if (_strategy == PER_POD_IWRR_PERMUTE &&  _llss_pointer_wraparounds[ptr_idx] >= 5) {
+                            permute_schedule(schedule);
+                            uint32_t val = _rng() % schedule->size();
+                            _llss_pointers[ptr_idx] = val;
+                            _llss_pointer_wraparounds[ptr_idx] = 0;
+                        }
 
                         BaseQueue* chosen_q = nullptr;
                         
@@ -899,7 +897,12 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                             BaseQueue* candidate = schedule->at((ptr + i) % schedule->size());
                             if (_is_path_valid(pkt.dst(), candidate)) {
                                 chosen_q = candidate;
-                                _llss_pointers[ptr_idx] = (ptr + i + 1) % schedule->size();
+                                uint32_t new_ptr = (ptr + i + 1);
+                                if (new_ptr % schedule->size() != new_ptr) {
+                                    new_ptr = new_ptr % schedule->size();
+                                    _llss_pointer_wraparounds[ptr_idx]++;
+                                }
+                                _llss_pointers[ptr_idx] = new_ptr;
                                 break;
                             }
                         }
