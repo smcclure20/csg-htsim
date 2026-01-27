@@ -819,9 +819,13 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                     }
                     bool is_ack = (pkt.type() == CONSTCCAACK || pkt.type() == SWIFTACK);
                     uint32_t ptr_idx = dest_id * 2 + (is_ack ? 1 : 0);
-                    if (_llss_pointers[ptr_idx] == UINT32_MAX || 
-                        (_strategy == FIB_LLSS_PERMUTE && (_llss_pointers[ptr_idx] - _llss_pointer_wraparounds[ptr_idx] > 5 * available_hops->size()))) {
+                    if (_llss_pointers[ptr_idx] == UINT32_MAX ){
                         uint32_t val = _rng();
+                        _llss_pointers[ptr_idx] = val;
+                        _llss_pointer_wraparounds[ptr_idx] = val;
+                    }
+                    if (_strategy == FIB_LLSS_PERMUTE && (_llss_pointers[ptr_idx] - _llss_pointer_wraparounds[ptr_idx] > 10 * available_hops->size())) {
+                        uint32_t val = _llss_pointers[ptr_idx] + 1; // offset by 1 
                         _llss_pointers[ptr_idx] = val;
                         _llss_pointer_wraparounds[ptr_idx] = val;
                     }
@@ -883,9 +887,9 @@ Route* FatTreeSwitchDRB::getNextHop(Packet& pkt, BaseQueue* ingress_port){
                         
                         uint32_t ptr = _llss_pointers[ptr_idx];
 
-                        if (_strategy == PER_POD_IWRR_PERMUTE &&  _llss_pointer_wraparounds[ptr_idx] >= 5) {
-                            permute_schedule(schedule);
-                            uint32_t val = _rng() % schedule->size();
+                        if (_strategy == PER_POD_IWRR_PERMUTE &&  _llss_pointer_wraparounds[ptr_idx] >= 10) {
+                            // permute_schedule(schedule);
+                            uint32_t val = (_llss_pointers[ptr_idx] + 1) % schedule->size();
                             _llss_pointers[ptr_idx] = val;
                             _llss_pointer_wraparounds[ptr_idx] = 0;
                         }
