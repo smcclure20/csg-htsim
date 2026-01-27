@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
     stringstream flowfilename(ios_base::out);
-    uint32_t packet_size = 4000;
+    uint32_t packet_size = 4178;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
     simtime_picosec endtime = timeFromMs(1.2);
@@ -260,6 +260,7 @@ int main(int argc, char **argv) {
     cout << "hoststrat " << host_lb << endl;
     cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
+    cout << "pkt size " << Packet::data_packet_size() << endl;
       
     
     // Log of per-flow stats
@@ -364,7 +365,7 @@ int main(int argc, char **argv) {
         // }
                         
         if (crt->size>0){
-            sender->set_flowsize(crt->size, k);
+            sender->set_flowsize(crt->size / no_of_subflows, k);
         } 
 
         if (assume_no_loss) {

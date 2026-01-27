@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
     stringstream flowfilename(ios_base::out);
-    uint32_t packet_size = 4000;
+    uint32_t packet_size = 4178;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
     simtime_picosec endtime = timeFromMs(1.2);
@@ -256,6 +256,7 @@ int main(int argc, char **argv) {
     cout << "hoststrat " << host_lb << endl;
     cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
+    cout << "pkt size " << Packet::data_packet_size() << endl;
 
     if (host_lb == PLB && queue_type == COMPOSITE) {
         cout << "PLB and composite queueing not supported (for now)" << endl;
@@ -520,16 +521,6 @@ int main(int argc, char **argv) {
         }
     }   
     flowlog.close();
-    list <ConstantCcaSink*>::iterator sink_i;
-    for (sink_i = sinks.begin(); sink_i != sinks.end(); sink_i++) {
-        cout << (*sink_i)->nodename() << " received " << (*sink_i)->cumulative_ack() << " bytes" << endl;
-        if ((*sink_i)->cumulative_ack() < 2004000) {
-            cout << "Incomplete flow " << endl;
-            ConstantCcaSink* sink = (*sink_i);
-            ConstantCcaSrc* counterpart_src = sink->_src;
-            cout << "Src, sent: " << counterpart_src->_highest_dsn_sent << "; last acked " << counterpart_src->highest_dsn_ack() << endl;
-        }
-    }
     /*
     uint64_t total_rtt = 0;
     cout << "RTT Histogram";

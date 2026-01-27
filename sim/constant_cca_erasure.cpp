@@ -123,7 +123,7 @@ ConstantErasureCcaSrc::ConstantErasureCcaSrc(EventList &eventlist, uint32_t addr
     _uec_mp = new UecMpReps(16000, false, true);
     
 
-    _mss = Packet::data_packet_size();
+    _mss = Packet::data_packet_size() - 62 - 20;
     _scheduler = NULL;
     _flow_size = ((uint64_t)1)<<63;
     _stop_time = 0;

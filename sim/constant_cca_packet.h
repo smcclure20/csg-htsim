@@ -107,7 +107,7 @@ public:
     virtual PktPriority priority() const {return Packet::PRIO_HI;}
 
     virtual ~ConstantCcaAck(){}
-    const static int ACKSIZE=40;
+    const static int ACKSIZE=82;
 protected:
     seq_t _seqno;
     seq_t _ackno;

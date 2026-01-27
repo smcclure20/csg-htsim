@@ -132,7 +132,7 @@ ConstantCcaSubflowSrc::ConstantCcaSubflowSrc(ConstantCcaSrc& src, TrafficLogger*
     _rtx_timeout_pending = false;
     _RFC2988_RTO_timeout = timeInf;
 
-    _mss = Packet::data_packet_size();
+    _mss = Packet::data_packet_size() - 62 - 20;
     _const_cwnd = 1000 * _mss; 
     _maxcwnd = 0xffffffff;//200*_mss;
 
@@ -779,7 +779,7 @@ ConstantCcaSubflowSrc::move_path_flow_label() {
 ConstantCcaSrc::ConstantCcaSrc(ConstantCcaRtxTimerScanner& rtx_scanner, EventList &eventlist, uint32_t addr, simtime_picosec pacing_delay, TrafficLogger* pkt_logger)
     : EventSource(eventlist,"constcca"),  _traffic_logger(pkt_logger), _rtx_timer_scanner(&rtx_scanner)
 {
-    _mss = Packet::data_packet_size();
+    _mss = Packet::data_packet_size() - 62 - 20;
     _scheduler = NULL;
     _flow_size = ((uint64_t)1)<<63;
     _stop_time = 0;

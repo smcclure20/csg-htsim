@@ -47,6 +47,8 @@ uint32_t RTT = 1; // this is per link delay in us; identical RTT microseconds = 
 #define USE_FIRST_FIT 0
 #define FIRST_FIT_INTERVAL 100
 
+extern void set_enable_bgp(bool b);
+
 enum NetRouteStrategy {SOURCE_ROUTE= 0, ECMP = 1, ADAPTIVE_ROUTING = 2, ECMP_ADAPTIVE = 3, RR = 4, RR_ECMP = 5};
 
 enum HostLBStrategy {NOLB = 0, SPRAY = 1, PLB = 2, SPRAY_ADAPTIVE = 3};
@@ -66,7 +68,7 @@ int main(int argc, char **argv) {
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     stringstream filename(ios_base::out);
     stringstream flowfilename(ios_base::out);
-    uint32_t packet_size = 4000;
+    uint32_t packet_size = 4178;
     uint32_t no_of_subflows = 1;
     simtime_picosec tput_sample_time = timeFromUs((uint32_t)12);
     simtime_picosec endtime = timeFromMs(1.2);
@@ -237,10 +239,16 @@ int main(int argc, char **argv) {
             } else if (!strcmp(argv[i+1], "llss")) {
                 FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::PER_POD_IWRR); 
                 route_strategy = ECMP; // Use ECMP enum for main logic as it's just a switch strategy
-            }  else if (!strcmp(argv[i+1], "fib_llss")) {
+            } else if (!strcmp(argv[i+1], "llss_perm")) {
+                FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::PER_POD_IWRR_PERMUTE); 
+                route_strategy = ECMP; // Use ECMP enum for main logic as it's just a switch strategy
+            } else if (!strcmp(argv[i+1], "fib_llss")) {
                 FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::FIB_LLSS);
                 route_strategy = ECMP;
-            } else {
+            } else if (!strcmp(argv[i+1], "fib_llss_perm")) {
+                FatTreeSwitchDRB::set_strategy(FatTreeSwitchDRB::FIB_LLSS_PERMUTE);
+                route_strategy = ECMP;
+            }  else {
                 exit_error(argv[0]);
             }
             i++;
@@ -262,6 +270,7 @@ int main(int argc, char **argv) {
     cout << "hoststrat " << host_lb << endl;
     cout << "strategy " << route_strategy << endl;
     cout << "subflows " << no_of_subflows << endl;
+    cout << "pkt size " << Packet::data_packet_size() << endl;
 
     if (host_lb == PLB && queue_type == COMPOSITE) {
         cout << "PLB and composite queueing not supported (for now)" << endl;
