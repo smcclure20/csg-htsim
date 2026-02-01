@@ -51,7 +51,7 @@ class BaseQueue  : public EventSource, public PacketSink, public Drawable {
     virtual mem_b queuesize() const = 0;
     virtual mem_b maxsize() const = 0;
 
-    void changeRate(linkspeed_bps rate) { _ps_per_byte = (simtime_picosec)((pow(10.0, 12.0) * 8) / _bitrate);} // NOTE: this should generally not be used. only exposed for failures
+    void changeRate(linkspeed_bps rate) { _bitrate = rate; _ps_per_byte = (simtime_picosec)((pow(10.0, 12.0) * 8) / _bitrate);} // NOTE: this should generally not be used. only exposed for failures
     
     inline simtime_picosec drainTime(Packet *pkt) { 
             return (simtime_picosec)(pkt->size() * _ps_per_byte); 
