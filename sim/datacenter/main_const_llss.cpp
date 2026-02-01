@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
             plb_ecn = atoi(argv[i+1]);
             i++;
         }  else if (!strcmp(argv[i],"-ecnthres")){
-            ecn_thres = atoi(argv[i+1]);
+            ecn_thres = atof(argv[i+1]);
             FatTreeSwitchDRB::set_ecn_threshold(ecn_thres);
             i++;
         } else if (!strcmp(argv[i],"-trim")){

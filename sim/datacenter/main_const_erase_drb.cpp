@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
             weight_return_time = timeFromUs(atof(argv[i+3]));
             i+=3;
         } else if (!strcmp(argv[i],"-plbecn")){
-            plb_ecn = atoi(argv[i+1]);
+            plb_ecn = atof(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-ecnthres")){
             ecn_thres = atoi(argv[i+1]);

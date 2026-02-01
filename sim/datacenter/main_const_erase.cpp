@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
             plb_ecn = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-ecnthres")){
-            ecn_thres = atoi(argv[i+1]);
+            ecn_thres = atof(argv[i+1]);
             FatTreeSwitch::set_ecn_threshold(ecn_thres);
             i++;
         } else if (!strcmp(argv[i],"-trim")){ // TODO: Get rid of these parameters which would be incoherent in this setting
@@ -285,6 +285,7 @@ int main(int argc, char **argv) {
     // if (flaky_links > 0) {
     //     top->set_flaky_links(flaky_links, timeFromUs(100.0), timeFromUs(10.0)); // todo: parameterize this
     // }
+    // TODO: read failures from file (type, switch, port)
     if (binary_failure) {
         for (int i=0; i< binary_failures; i++){
             failure_managers.push_back(new FailureManager(top, eventlist, fail_time, route_recovery_time, weight_recovery_time, failure_type));
